@@ -17,7 +17,8 @@ pkgs.mkShellNoCC {
     export PS1="\[\033[0;32m\][\u@\h \W]\\$ \[\033[0m\]"
     echo -ne "\033[0;31mThesis Nix Environment\033[0m\n"
     echo -ne "\033[0;31mNode Version:\033[0;33m $(node --version)\033[0m\n"
-    #node --version
+    export OZONE_PLATFORM=wayland
+    export ELECTRON_OZONE_PLATFORM_HINT=wayland    #node --version
     
   '';
 }
