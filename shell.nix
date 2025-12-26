@@ -8,6 +8,9 @@ pkgs.mkShellNoCC {
   packages = with pkgs; [
     nodejs_22
     pkgs.bashInteractive
+    typescript-language-server
+    vscode-langservers-extracted
+    tailwindcss-language-server
   ];
 
   # Ensure Nix uses this bash, not system bash
