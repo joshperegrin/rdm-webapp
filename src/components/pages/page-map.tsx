@@ -1,7 +1,11 @@
 
 function MapPage(){
   return (
-    <div className="bg-indigo-500 h-full w-full"></div>
+    <div className="flex  h-full w-full">
+      <div className="hidden md:flex md:w-1/4 lg:w-80 bg-indigo-500"></div>
+      <div className="flex flex-1 bg-slate-900"></div>
+      <div className="hidden md:flex md:w-1/4 lg:w-80 bg-indigo-500"></div>
+    </div>
   )
 }
 
