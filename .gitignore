@@ -24,3 +24,6 @@ dist-electron/
 *.njsproj
 *.sln
 *.sw?
+dist-electron
+dist-electron/main.js
+dist-electron/preload.mjs
