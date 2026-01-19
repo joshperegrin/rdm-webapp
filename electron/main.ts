@@ -50,9 +50,9 @@ function createWindow() {
   }
   const reciever = new ReceiverClient()
   
-  ipcMain.handle('rasp_connection:connect_client', (event, data) => {
-    reciever.connectClient(data.rasp_ip, data.rasp_port)
-  })
+  ipcMain.handle('rasp_connection:connect_client', (_, data) => reciever.connectClient(data.rasp_ip, data.rasp_port))
+  ipcMain.handle('rasp_connection:send_startreq', () => reciever.sendStartRequest())
+  ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
   
 }
 

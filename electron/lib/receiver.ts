@@ -15,6 +15,12 @@ export enum Response {
   ERROR_START     = 0x13,
   SUCC_STOP       = 0x14,
   ERROR_STOP      = 0x15,
+  TIMEOUT         = 0x99,
+}
+
+export interface PendingRequest {
+  resolve: (res: Response) => void;
+  timer: NodeJS.Timeout;
 }
 
 class ReceiverClient {
@@ -22,46 +28,125 @@ class ReceiverClient {
   rasp_port: number = 12345;
   private port: number = 12345;
   private client: net.Socket;
-  private udpListener: dgram.Socket;
-  
+  private udpListener: dgram.Socket | null = null;
+  private pendingRequests: PendingRequest[] = [];
+  private receivedBuffer: Buffer = Buffer.alloc(0);
+
   constructor(){
     this.client = new net.Socket();
-    this.client.on('data', this.processTCPResponse)
-    this.udpListener = dgram.createSocket('udp4');
-    this.udpListener.on('message', this.processUDPPacket)
+    this.client.on('data', (data) => this.processTCPResponse(data))
   }
   
-  connectClient(rasp_ip: string, rasp_port: number){
+
+  private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
+    return new Promise((resolve) => {
+      // prepare packet
+      const header = Buffer.alloc(8);
+      header.writeUInt32BE(payload.length, 0);
+      header.writeUInt32BE(cmd, 4);
+      const packet = Buffer.concat([header, payload]);
+      
+      const timer = setTimeout(() => {
+        const index = this.pendingRequests.findIndex(req => req.timer === timer);
+        if (index !== -1){
+          this.pendingRequests.splice(index, 1);
+        }
+        console.warn(`[TIMEOUT] Command ${cmd} timed out.`)
+        resolve(Response.TIMEOUT);
+      }, timeoutMs)
+
+      this.pendingRequests.push({ resolve, timer });
+
+      this.client.write(packet);
+    })
+  }
+  connectClient(rasp_ip: string, rasp_port: number): Promise<void>{
     this.rasp_port = rasp_port;
     this.rasp_ip = rasp_ip;
-    this.client.connect(this.rasp_port, this.rasp_ip) // TODO: Add Error
+    return new Promise((resolve, reject) => {
+      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) // TODO: Add Error
+      this.client.once('error', reject)
+    })
   }
 
   sendStartRequest(){
     // initialize the listener
-    this.udpListener.bind(this.port);
+    
+    if(this.udpListener){
+      console.warn("Capture already started");
+      return Promise.resolve(Response.SUCC_START)
+    }
+
+    try {
+      console.log("LMAOOO")
+      this.udpListener = dgram.createSocket('udp4');
+      this.udpListener.bind(this.port);
+      this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo))
+      this.udpListener.on('error', (err) => {
+        console.error("UDP Error:", err);
+        this.udpListener?.close();
+        this.udpListener = null;
+      })
+      
+    } catch (e) {
+      console.error("Failed to bind UDP port", e);
+      return Promise.resolve(Response.ERROR_START)
+    }
     
     // prepare packet
     const config = {
       receiver_port: this.port
     };
+    const payload = Buffer.from(JSON.stringify(config), 'utf-8');
 
-    const payloadBuffer = Buffer.from(JSON.stringify(config), 'utf-8');
-    const header = Buffer.alloc(8);
-    header.writeUInt32BE(payloadBuffer.length, 0);
-    header.writeUInt32BE(Command.START_CAPTURE, 4);
-    const packet = Buffer.concat([header, payloadBuffer]);
-
+    console.log("TESTINGGG")
     // send packet
-    this.client.write(packet);
+    return this.sendCommand(Command.START_CAPTURE, payload)
   }
 
-  sendStopRequest(){
-    this.client.write(Buffer.from([Command.STOP_CAPTURE])); 
-    this.udpListener.close(); // Add notification system for notifying events
+  async sendStopRequest(){
+    const response = await this.sendCommand(Command.STOP_CAPTURE, Buffer.alloc(0))
+    console.log("TESTINGGG2")
+    if (this.udpListener){
+      this.udpListener.close();
+      this.udpListener = null;
+    }
+    return response;
   }
 
-  private processTCPResponse(data: string | NonSharedBuffer) {}
+  private processTCPResponse(data: string | NonSharedBuffer) {
+    // Append new data to buffer
+    this.receivedBuffer = Buffer.concat([this.receivedBuffer, Buffer.from(data)])
+
+    // Process complete message in buffer
+
+    while(true){
+      if(this.receivedBuffer.length < 8) break;
+      const length = this.receivedBuffer.readUInt32BE(0);
+      const cmdID = this.receivedBuffer.readUInt32BE(4);
+
+      if (this.receivedBuffer.length < 8 + length) break
+      
+      this.receivedBuffer = this.receivedBuffer.subarray(8+length);
+
+      // Handle CONN_SUCCESS
+
+      if (cmdID === Response.CONN_SUCCESS) {
+        console.log("Server Connected")
+        continue;
+      }
+
+      const req = this.pendingRequests.shift()
+      if(req){
+        clearTimeout(req.timer);
+        req.resolve(cmdID as Response);
+      } else {
+        console.warn("Received response but no pending request: ", cmdID)
+      }
+    
+    }
+    // Resolve oldest pending request
+  }
   private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
     console.log(msg)
     // decode
