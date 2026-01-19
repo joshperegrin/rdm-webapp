@@ -148,12 +148,42 @@ class ReceiverClient {
     // Resolve oldest pending request
   }
   private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
-    console.log(msg)
-    // decode
-    // image on buffer
-    // send buffer to renderer
-    // send buffer to inference
-    // send buffer to write file system
+    try {
+      // Extract JSON Length
+      if (msg.length < 2) return;
+      const jsonLength = msg.readUInt16BE(0);
+      if (msg.length < 2 + jsonLength) {
+        console.warn("Packet too short for declared JSON length");
+        return;
+      }
+
+      // Extract GPS
+      const jsonStartIdx = 2;
+      const jsonEndIdx = 2 + jsonLength;
+      const jsonBuffer = msg.subarray(jsonStartIdx, jsonEndIdx);
+      const gpsData = JSON.parse(jsonBuffer.toString('utf-8'));
+
+      console.log("Telemetry Received: ", gpsData);
+
+      // Extract Image Data
+      const imageBuffer = msg.subarray(jsonEndIdx);
+
+      // Verify we actually have image data
+      if (imageBuffer.length === 0) return;
+
+      console.log("Image Data: ", imageBuffer)
+      // A. Send to Renderer (e.g., frontend via WebSocket)
+      // this.sendToRenderer(imageBuffer, gpsData);
+
+      // B. Send to Inference (e.g., Object detection)
+      // this.runInference(imageBuffer);
+
+      // C. Write to File System
+      // this.saveFrame(imageBuffer, gpsData);
+
+    } catch (err) {
+      console.error("Error decoding UDP packet:", err);
+    }
   }
 }
 
