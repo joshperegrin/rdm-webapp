@@ -51,7 +51,14 @@ function createWindow() {
   const reciever = new ReceiverClient()
   
   ipcMain.handle('rasp_connection:connect_client', (_, data) => reciever.connectClient(data.rasp_ip, data.rasp_port))
-  ipcMain.handle('rasp_connection:send_startreq', () => reciever.sendStartRequest())
+  ipcMain.handle('rasp_connection:send_startreq', () => {
+    return reciever.sendStartRequest((buffer)=> {
+      const safeData = new Uint8Array(buffer);
+      if(win && !win.isDestroyed()){
+        win.webContents.send('preview-frame', safeData)
+      }
+    })
+  })
   ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
   
 }

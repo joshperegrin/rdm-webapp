@@ -26,6 +26,7 @@ export interface PendingRequest {
 class ReceiverClient {
   rasp_ip: string = "192.168.1.14";
   rasp_port: number = 12345;
+  liveInferencePreview: boolean = false;
   private port: number = 12345;
   private client: net.Socket;
   private udpListener: dgram.Socket | null = null;
@@ -69,7 +70,7 @@ class ReceiverClient {
     })
   }
 
-  sendStartRequest(){
+  sendStartRequest(previewCallback: (buffer: Buffer) => void){
     // initialize the listener
     
     if(this.udpListener){
@@ -81,7 +82,7 @@ class ReceiverClient {
       console.log("LMAOOO")
       this.udpListener = dgram.createSocket('udp4');
       this.udpListener.bind(this.port);
-      this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo))
+      this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo, previewCallback))
       this.udpListener.on('error', (err) => {
         console.error("UDP Error:", err);
         this.udpListener?.close();
@@ -147,7 +148,7 @@ class ReceiverClient {
     }
     // Resolve oldest pending request
   }
-  private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
+  private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void) {
     try {
       // Extract JSON Length
       if (msg.length < 2) return;
@@ -172,14 +173,21 @@ class ReceiverClient {
       if (imageBuffer.length === 0) return;
 
       console.log("Image Data: ", imageBuffer)
-      // A. Send to Renderer (e.g., frontend via WebSocket)
-      // this.sendToRenderer(imageBuffer, gpsData);
-
+      
+      // C. Write to File System
+      // this.saveFrame(imageBuffer, gpsData);
+      
+      if(!this.liveInferencePreview) previewCallback(imageBuffer)
+      // const {} = await this.runInference(imageBuffer);
+      // if(this.liveInferencePreview) // run send to renderer the image with bounding box
+      // addPothole({}) // callback
+      
       // B. Send to Inference (e.g., Object detection)
       // this.runInference(imageBuffer);
 
-      // C. Write to File System
-      // this.saveFrame(imageBuffer, gpsData);
+      // TO SEND: IMAGE BUFFER
+      // TO RECEIVE: CROPPED IMAGE?(depends on the performance), BOUNDING BOX, 
+  
 
     } catch (err) {
       console.error("Error decoding UDP packet:", err);

@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button";
+import { useAtom } from "jotai";
 import { CirclePlay, CircleStop, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { imgUrlAtom, setDetectionImageFrame } from "@/state";
+
 
 
 enum Response {
@@ -15,6 +18,12 @@ enum Response {
 
 function DetectionPage(){
   const [isDetecting, setIsDetecting] = useState(0) // 0 not detection, 1 detecting, 2 waiting for response
+  const [imgUrl, _] = useAtom(imgUrlAtom)
+  useEffect(() => {
+    window.rasp_connection.onPreviewFrame((buffer: Uint8Array) => {
+      setDetectionImageFrame(buffer as any)
+    })
+  }, [])
   const connect_client = () => {
     window.rasp_connection.connect_client("192.168.1.14", 12345)
   }
@@ -43,6 +52,7 @@ function DetectionPage(){
         </Button>
       </div>
       <div className="flex flex-1">
+        <img src={imgUrl}/>
       </div>
     </div>
   )

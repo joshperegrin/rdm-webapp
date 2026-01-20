@@ -29,6 +29,7 @@ declare global {
       connect_client: (rasp_ip: string, rasp_port: number) => Promise<Response>
       send_startreq: () => Promise<Response>
       send_stopreq: () => Promise<Response>
+      onPreviewFrame: (callback: (buffer: Uint8Array) => void) => void
     }
   }
 }

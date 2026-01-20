@@ -1,7 +1,7 @@
 
 import { atom } from "jotai";
 import { loadable } from "jotai/utils";
-
+import { createStore } from 'jotai/vanilla'
 
 // atom for detect page detected potholes (array of potholes)
 // derived atom for total detected?
@@ -142,3 +142,20 @@ export const searchResultsAtom = atom(
   }
 )
 export const searchResultsLoadable = loadable(searchResultsAtom)
+
+
+export const store = createStore()
+
+export const imgUrlAtom = atom('')
+
+export function setDetectionImageFrame(buffer: Buffer){
+  if(buffer) {
+    const previousURL = store.get(imgUrlAtom);
+    if (previousURL === ''){
+      URL.revokeObjectURL(previousURL)
+    }
+    
+    const blob = new Blob([buffer as BlobPart], { type:'image/jpg' })
+    store.set(imgUrlAtom, URL.createObjectURL(blob));
+  }
+}
