@@ -41,6 +41,7 @@ class ReceiverClient {
   private udpListener: dgram.Socket | null = null;
   private pendingRequests: PendingRequest[] = [];
   private receivedBuffer: Buffer = Buffer.alloc(0);
+  private udpInferenceSender: dgram.Socket | null = null;
 
   constructor(){
     this.client = new net.Socket();
@@ -88,7 +89,7 @@ class ReceiverClient {
     }
 
     try {
-      console.log("LMAOOO")
+      // create listener for raspberry pi stream
       this.udpListener = dgram.createSocket('udp4');
       this.udpListener.bind(this.port);
       this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo, previewCallback))
@@ -98,6 +99,14 @@ class ReceiverClient {
         this.udpListener = null;
       })
       
+      // create a sender for sending frames for inference
+      this.udpInferenceSender = dgram.createSocket('udp4');
+      this.udpInferenceSender.on("message", (msg, rinfo) => this.handleInferenceMessage(msg, rinfo, previewCallback))
+      this.udpInferenceSender.on('error', (err) => {
+        console.error("UDP Error:", err);
+        this.udpInferenceSender?.close();
+        this.udpInferenceSender = null;
+      })
     } catch (e) {
       console.error("Failed to bind UDP port", e);
       return Promise.resolve(Response.ERROR_START)
@@ -167,44 +176,31 @@ class ReceiverClient {
         return;
       }
 
-      // Extract GPS
-      const jsonStartIdx = 2;
-      const jsonEndIdx = 2 + jsonLength;
-      const jsonBuffer = msg.subarray(jsonStartIdx, jsonEndIdx);
-      const gpsData = JSON.parse(jsonBuffer.toString('utf-8'));
-
-      console.log("Telemetry Received: ", gpsData);
-
       // Extract Image Data
-      const imageBuffer = msg.subarray(jsonEndIdx);
-
-      // Verify we actually have image data
+      const imageBuffer = msg.subarray(2 + jsonLength);
       if (imageBuffer.length === 0) return;
 
-      console.log("Image Data: ", imageBuffer)
-      
-      // C. Write to File System
-      // this.saveFrame(imageBuffer, gpsData);
-      
+      // Prepend the LivePreview Toggle
+      const prependByte = 0x01;
+      const newMsg = Buffer.allocUnsafe(msg.length + 1)
+      newMsg[0] = prependByte;
+      msg.copy(newMsg, 1)
+    
+      // Send Data
       if(!this.liveInferencePreview) previewCallback(imageBuffer)
-      // const {} = await this.runInference(imageBuffer);
-      // if(this.liveInferencePreview) // run send to renderer the image with bounding box
-      // addPothole({}) // callback
-      
-      // B. Send to Inference (e.g., Object detection)
-      // this.runInference(imageBuffer);
-
-      // TO SEND: IMAGE BUFFER
-      // TO RECEIVE: CROPPED IMAGE?(depends on the performance), BOUNDING BOX, 
-  
+      this.udpInferenceSender?.send(newMsg, 9123, "127.0.0.1")
 
     } catch (err) {
       console.error("Error decoding UDP packet:", err);
     }
   }
+  private handleInferenceMessage(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void){
+    console.log("Inference Received")
+  }
+
 }
 
-function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
+export function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
   const isWin = process.platform === 'win32';
   const binaryName = isWin ? 'python.exe' : 'bin/python3';
 
