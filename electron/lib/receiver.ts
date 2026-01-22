@@ -181,11 +181,11 @@ class ReceiverClient {
       if (imageBuffer.length === 0) return;
 
       // Prepend the LivePreview Toggle
-      const prependByte = 0x01;
+      const prependByte = this.liveInferencePreview? 0x01 : 0x00;
       const newMsg = Buffer.allocUnsafe(msg.length + 1)
       newMsg[0] = prependByte;
       msg.copy(newMsg, 1)
-    
+      
       // Send Data
       if(!this.liveInferencePreview) previewCallback(imageBuffer)
       this.udpInferenceSender?.send(newMsg, 9123, "127.0.0.1")
