@@ -29,3 +29,4 @@ dist-electron/main.js
 dist-electron/preload.mjs
 resources/python/win
 resources/python/linux
+resources/scripts/models
