@@ -27,3 +27,5 @@ dist-electron/
 dist-electron
 dist-electron/main.js
 dist-electron/preload.mjs
+resources/python/win
+resources/python/linux

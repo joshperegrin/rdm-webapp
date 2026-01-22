@@ -1,430 +1,566 @@
 diff --git a/changes.patch b/changes.patch
-index 70b61b7..e69de29 100644
+index 4829d9b..e69de29 100644
 --- a/changes.patch
 +++ b/changes.patch
-@@ -1,372 +0,0 @@
+@@ -1,430 +0,0 @@
 -diff --git a/changes.patch b/changes.patch
--index 501580e..e69de29 100644
+-index 70b61b7..e69de29 100644
 ---- a/changes.patch
 -+++ b/changes.patch
--@@ -1,96 +0,0 @@
---diff --git a/electron/main.ts b/electron/main.ts
---index be9bbf4..c05776a 100644
------ a/electron/main.ts
---+++ b/electron/main.ts
---@@ -1,7 +1,9 @@
----import { app, BrowserWindow } from 'electron'
---+import { app, BrowserWindow, ipcMain } from 'electron'
--- import { createRequire } from 'node:module'
--- import { fileURLToPath } from 'node:url'
--- import path from 'node:path'
---+import ReceiverClient from './lib/receiver'
---+//import { ipcRenderer } from 'electron'
+-@@ -1,372 +0,0 @@
+--diff --git a/changes.patch b/changes.patch
+--index 501580e..e69de29 100644
+----- a/changes.patch
+--+++ b/changes.patch
+--@@ -1,96 +0,0 @@
+---diff --git a/electron/main.ts b/electron/main.ts
+---index be9bbf4..c05776a 100644
+------ a/electron/main.ts
+---+++ b/electron/main.ts
+---@@ -1,7 +1,9 @@
+----import { app, BrowserWindow } from 'electron'
+---+import { app, BrowserWindow, ipcMain } from 'electron'
+--- import { createRequire } from 'node:module'
+--- import { fileURLToPath } from 'node:url'
+--- import path from 'node:path'
+---+import ReceiverClient from './lib/receiver'
+---+//import { ipcRenderer } from 'electron'
+--- 
+--- const require = createRequire(import.meta.url)
+--- const __dirname = path.dirname(fileURLToPath(import.meta.url))
+---@@ -31,6 +33,7 @@ function createWindow() {
+---     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+---     webPreferences: {
+---       preload: path.join(__dirname, 'preload.mjs'),
+---+      contextIsolation: true,
+---     },
+---   })
+--- 
+---@@ -45,10 +48,16 @@ function createWindow() {
+---     // win.loadFile('dist/index.html')
+---     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+---   }
+---+  const reciever = new ReceiverClient()
+---+  
+---+  ipcMain.handle('rasp_connection:connect_client', (event, data) => {
+---+    reciever.connectClient(data.rasp_ip, data.rasp_port)
+---+  })
+---+  
+--- }
+--- 
+--- // Quit when all windows are closed, except on macOS. There, it's common
+----// for applications and their menu bar to stay active until the user quits
+---+// for appkications and their menu bar to stay active until the user quits
+--- // explicitly with Cmd + Q.
+--- app.on('window-all-closed', () => {
+---   if (process.platform !== 'darwin') {
+---diff --git a/electron/preload.ts b/electron/preload.ts
+---index 05e341d..168ae2e 100644
+------ a/electron/preload.ts
+---+++ b/electron/preload.ts
+---@@ -1,24 +1,6 @@
+--- import { ipcRenderer, contextBridge } from 'electron'
+--- 
+--- // --------- Expose some API to the Renderer process ---------
+----contextBridge.exposeInMainWorld('ipcRenderer', {
+----  on(...args: Parameters<typeof ipcRenderer.on>) {
+----    const [channel, listener] = args
+----    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+----  },
+----  off(...args: Parameters<typeof ipcRenderer.off>) {
+----    const [channel, ...omit] = args
+----    return ipcRenderer.off(channel, ...omit)
+----  },
+----  send(...args: Parameters<typeof ipcRenderer.send>) {
+----    const [channel, ...omit] = args
+----    return ipcRenderer.send(channel, ...omit)
+----  },
+----  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
+----    const [channel, ...omit] = args
+----    return ipcRenderer.invoke(channel, ...omit)
+----  },
+----
+----  // You can expose other APTs you need here.
+----  // ...
+---+contextBridge.exposeInMainWorld('rasp_connection', {
+---+  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port })
+--- })
+---diff --git a/src/components/pages/page-detection.tsx b/src/components/pages/page-detection.tsx
+---index 88c853e..3b39b96 100644
+------ a/src/components/pages/page-detection.tsx
+---+++ b/src/components/pages/page-detection.tsx
+---@@ -3,6 +3,9 @@ import { CirclePlay, CircleStop } from "lucide-react";
+--- 
+--- function DetectionPage(){
+---   const lmao = () => {}
+---+  const connect_client = () => {
+---+    window.rasp_connection.connect_client("192.168.1.14", 12345)
+---+  }
+---   return (
+---     <div className="flex flex-row h-full w-full">
+---       <div className="hidden md:flex md:w-1/3 lg:w-90 ">
+---@@ -10,6 +13,9 @@ function DetectionPage(){
+---           <CirclePlay /> Start
+---           <CircleStop /> Stop
+---         </Button>
+---+        <Button onClick={connect_client} className="cursor-pointer" variant="outline" size="sm">
+---+          Connect
+---+        </Button>
+---       </div>
+---       <div className="flex flex-1">
+---       </div>
+--diff --git a/electron/electron-env.d.ts b/electron/electron-env.d.ts
+--index 1fdef4b..87e5587 100644
+----- a/electron/electron-env.d.ts
+--+++ b/electron/electron-env.d.ts
+--@@ -1,4 +1,5 @@
+-- /// <reference types="vite-plugin-electron/electron-env" />
+--+import {Response} from './lib/receiver'
 -- 
--- const require = createRequire(import.meta.url)
--- const __dirname = path.dirname(fileURLToPath(import.meta.url))
---@@ -31,6 +33,7 @@ function createWindow() {
---     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
---     webPreferences: {
---       preload: path.join(__dirname, 'preload.mjs'),
---+      contextIsolation: true,
---     },
---   })
--- 
---@@ -45,10 +48,16 @@ function createWindow() {
---     // win.loadFile('dist/index.html')
---     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
---   }
---+  const reciever = new ReceiverClient()
---+  
---+  ipcMain.handle('rasp_connection:connect_client', (event, data) => {
---+    reciever.connectClient(data.rasp_ip, data.rasp_port)
---+  })
---+  
+-- declare namespace NodeJS {
+--   interface ProcessEnv {
+--@@ -22,6 +23,14 @@ declare namespace NodeJS {
 -- }
 -- 
--- // Quit when all windows are closed, except on macOS. There, it's common
----// for applications and their menu bar to stay active until the user quits
---+// for appkications and their menu bar to stay active until the user quits
--- // explicitly with Cmd + Q.
--- app.on('window-all-closed', () => {
---   if (process.platform !== 'darwin') {
+-- // Used in Renderer process, expose in `preload.ts`
+---interface Window {
+---  ipcRenderer: import('electron').IpcRenderer
+--+declare global {
+--+  interface Window {
+--+    rasp_connection: {
+--+      connect_client: (rasp_ip: string, rasp_port: number) => Promise<Response>
+--+      send_startreq: () => Promise<Response>
+--+      send_stopreq: () => Promise<Response>
+--+    }
+--+  }
+-- }
+--+
+--+export {}
+--diff --git a/electron/lib/receiver.ts b/electron/lib/receiver.ts
+--index d82b896..79e1309 100644
+----- a/electron/lib/receiver.ts
+--+++ b/electron/lib/receiver.ts
+--@@ -15,6 +15,12 @@ export enum Response {
+--   ERROR_START     = 0x13,
+--   SUCC_STOP       = 0x14,
+--   ERROR_STOP      = 0x15,
+--+  TIMEOUT         = 0x99,
+--+}
+--+
+--+export interface PendingRequest {
+--+  resolve: (res: Response) => void;
+--+  timer: NodeJS.Timeout;
+-- }
+-- 
+-- class ReceiverClient {
+--@@ -22,46 +28,125 @@ class ReceiverClient {
+--   rasp_port: number = 12345;
+--   private port: number = 12345;
+--   private client: net.Socket;
+---  private udpListener: dgram.Socket;
+---  
+--+  private udpListener: dgram.Socket | null = null;
+--+  private pendingRequests: PendingRequest[] = [];
+--+  private receivedBuffer: Buffer = Buffer.alloc(0);
+--+
+--   constructor(){
+--     this.client = new net.Socket();
+---    this.client.on('data', this.processTCPResponse)
+---    this.udpListener = dgram.createSocket('udp4');
+---    this.udpListener.on('message', this.processUDPPacket)
+--+    this.client.on('data', (data) => this.processTCPResponse(data))
+--   }
+--   
+---  connectClient(rasp_ip: string, rasp_port: number){
+--+
+--+  private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
+--+    return new Promise((resolve) => {
+--+      // prepare packet
+--+      const header = Buffer.alloc(8);
+--+      header.writeUInt32BE(payload.length, 0);
+--+      header.writeUInt32BE(cmd, 4);
+--+      const packet = Buffer.concat([header, payload]);
+--+      
+--+      const timer = setTimeout(() => {
+--+        const index = this.pendingRequests.findIndex(req => req.timer === timer);
+--+        if (index !== -1){
+--+          this.pendingRequests.splice(index, 1);
+--+        }
+--+        console.warn(`[TIMEOUT] Command ${cmd} timed out.`)
+--+        resolve(Response.TIMEOUT);
+--+      }, timeoutMs)
+--+
+--+      this.pendingRequests.push({ resolve, timer });
+--+
+--+      this.client.write(packet);
+--+    })
+--+  }
+--+  connectClient(rasp_ip: string, rasp_port: number): Promise<void>{
+--     this.rasp_port = rasp_port;
+--     this.rasp_ip = rasp_ip;
+---    this.client.connect(this.rasp_port, this.rasp_ip) // TODO: Add Error
+--+    return new Promise((resolve, reject) => {
+--+      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) // TODO: Add Error
+--+      this.client.once('error', reject)
+--+    })
+--   }
+-- 
+--   sendStartRequest(){
+--     // initialize the listener
+---    this.udpListener.bind(this.port);
+--+    
+--+    if(this.udpListener){
+--+      console.warn("Capture already started");
+--+      return Promise.resolve(Response.SUCC_START)
+--+    }
+--+
+--+    try {
+--+      console.log("LMAOOO")
+--+      this.udpListener = dgram.createSocket('udp4');
+--+      this.udpListener.bind(this.port);
+--+      this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo))
+--+      this.udpListener.on('error', (err) => {
+--+        console.error("UDP Error:", err);
+--+        this.udpListener?.close();
+--+        this.udpListener = null;
+--+      })
+--+      
+--+    } catch (e) {
+--+      console.error("Failed to bind UDP port", e);
+--+      return Promise.resolve(Response.ERROR_START)
+--+    }
+--     
+--     // prepare packet
+--     const config = {
+--       receiver_port: this.port
+--     };
+--+    const payload = Buffer.from(JSON.stringify(config), 'utf-8');
+-- 
+---    const payloadBuffer = Buffer.from(JSON.stringify(config), 'utf-8');
+---    const header = Buffer.alloc(8);
+---    header.writeUInt32BE(payloadBuffer.length, 0);
+---    header.writeUInt32BE(Command.START_CAPTURE, 4);
+---    const packet = Buffer.concat([header, payloadBuffer]);
+---
+--+    console.log("TESTINGGG")
+--     // send packet
+---    this.client.write(packet);
+--+    return this.sendCommand(Command.START_CAPTURE, payload)
+--   }
+-- 
+---  sendStopRequest(){
+---    this.client.write(Buffer.from([Command.STOP_CAPTURE])); 
+---    this.udpListener.close(); // Add notification system for notifying events
+--+  async sendStopRequest(){
+--+    const response = await this.sendCommand(Command.STOP_CAPTURE, Buffer.alloc(0))
+--+    console.log("TESTINGGG2")
+--+    if (this.udpListener){
+--+      this.udpListener.close();
+--+      this.udpListener = null;
+--+    }
+--+    return response;
+--   }
+-- 
+---  private processTCPResponse(data: string | NonSharedBuffer) {}
+--+  private processTCPResponse(data: string | NonSharedBuffer) {
+--+    // Append new data to buffer
+--+    this.receivedBuffer = Buffer.concat([this.receivedBuffer, Buffer.from(data)])
+--+
+--+    // Process complete message in buffer
+--+
+--+    while(true){
+--+      if(this.receivedBuffer.length < 8) break;
+--+      const length = this.receivedBuffer.readUInt32BE(0);
+--+      const cmdID = this.receivedBuffer.readUInt32BE(4);
+--+
+--+      if (this.receivedBuffer.length < 8 + length) break
+--+      
+--+      this.receivedBuffer = this.receivedBuffer.subarray(8+length);
+--+
+--+      // Handle CONN_SUCCESS
+--+
+--+      if (cmdID === Response.CONN_SUCCESS) {
+--+        console.log("Server Connected")
+--+        continue;
+--+      }
+--+
+--+      const req = this.pendingRequests.shift()
+--+      if(req){
+--+        clearTimeout(req.timer);
+--+        req.resolve(cmdID as Response);
+--+      } else {
+--+        console.warn("Received response but no pending request: ", cmdID)
+--+      }
+--+    
+--+    }
+--+    // Resolve oldest pending request
+--+  }
+--   private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
+--     console.log(msg)
+--     // decode
+--diff --git a/electron/main.ts b/electron/main.ts
+--index c05776a..4335c6b 100644
+----- a/electron/main.ts
+--+++ b/electron/main.ts
+--@@ -50,9 +50,9 @@ function createWindow() {
+--   }
+--   const reciever = new ReceiverClient()
+--   
+---  ipcMain.handle('rasp_connection:connect_client', (event, data) => {
+---    reciever.connectClient(data.rasp_ip, data.rasp_port)
+---  })
+--+  ipcMain.handle('rasp_connection:connect_client', (_, data) => reciever.connectClient(data.rasp_ip, data.rasp_port))
+--+  ipcMain.handle('rasp_connection:send_startreq', () => reciever.sendStartRequest())
+--+  ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
+--   
+-- }
+-- 
 --diff --git a/electron/preload.ts b/electron/preload.ts
---index 05e341d..168ae2e 100644
+--index 168ae2e..4b3641b 100644
 ----- a/electron/preload.ts
 --+++ b/electron/preload.ts
---@@ -1,24 +1,6 @@
--- import { ipcRenderer, contextBridge } from 'electron'
+--@@ -2,5 +2,7 @@ import { ipcRenderer, contextBridge } from 'electron'
 -- 
 -- // --------- Expose some API to the Renderer process ---------
----contextBridge.exposeInMainWorld('ipcRenderer', {
----  on(...args: Parameters<typeof ipcRenderer.on>) {
----    const [channel, listener] = args
----    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
----  },
----  off(...args: Parameters<typeof ipcRenderer.off>) {
----    const [channel, ...omit] = args
----    return ipcRenderer.off(channel, ...omit)
----  },
----  send(...args: Parameters<typeof ipcRenderer.send>) {
----    const [channel, ...omit] = args
----    return ipcRenderer.send(channel, ...omit)
----  },
----  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
----    const [channel, ...omit] = args
----    return ipcRenderer.invoke(channel, ...omit)
----  },
----
----  // You can expose other APTs you need here.
----  // ...
---+contextBridge.exposeInMainWorld('rasp_connection', {
---+  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port })
+-- contextBridge.exposeInMainWorld('rasp_connection', {
+---  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port })
+--+  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port }),
+--+  send_startreq: () => ipcRenderer.invoke('rasp_connection:send_startreq'),
+--+  send_stopreq: () => ipcRenderer.invoke('rasp_connection:send_stopreq')
 -- })
 --diff --git a/src/components/pages/page-detection.tsx b/src/components/pages/page-detection.tsx
---index 88c853e..3b39b96 100644
+--index 3b39b96..ca67a7f 100644
 ----- a/src/components/pages/page-detection.tsx
 --+++ b/src/components/pages/page-detection.tsx
---@@ -3,6 +3,9 @@ import { CirclePlay, CircleStop } from "lucide-react";
+--@@ -1,17 +1,42 @@
+-- import { Button } from "@/components/ui/button";
+---import { CirclePlay, CircleStop } from "lucide-react";
+--+import { CirclePlay, CircleStop, Loader2 } from "lucide-react";
+--+import { useState } from "react";
+--+
+--+
+--+enum Response {
+--+  CONN_SUCCESS    = 0x10,
+--+  CONN_FAIL       = 0x11,
+--+  SUCC_START      = 0x12,
+--+  ERROR_START     = 0x13,
+--+  SUCC_STOP       = 0x14,
+--+  ERROR_STOP      = 0x15,
+--+  TIMEOUT         = 0x99,
+--+}
 -- 
 -- function DetectionPage(){
---   const lmao = () => {}
---+  const connect_client = () => {
---+    window.rasp_connection.connect_client("192.168.1.14", 12345)
+---  const lmao = () => {}
+--+  const [isDetecting, setIsDetecting] = useState(0) // 0 not detection, 1 detecting, 2 waiting for response
+--   const connect_client = () => {
+--     window.rasp_connection.connect_client("192.168.1.14", 12345)
+--   }
+--+  const toggle_detection = async () => {
+--+    const is_detecting = (isDetecting === 0)? false : (isDetecting === 1)? true : null;
+--+    setIsDetecting(2)
+--+    if (is_detecting === true) {
+--+      const response = await window.rasp_connection.send_stopreq()
+--+      setIsDetecting((response === Response.SUCC_STOP)? 1 : 0)
+--+    } else if (is_detecting === false) {
+--+      const response = await window.rasp_connection.send_startreq()
+--+      setIsDetecting((response === Response.SUCC_START)? 0 : 1)
+--+    } else {
+--+      
+--+    }
 --+  }
 --   return (
 --     <div className="flex flex-row h-full w-full">
 --       <div className="hidden md:flex md:w-1/3 lg:w-90 ">
---@@ -10,6 +13,9 @@ function DetectionPage(){
---           <CirclePlay /> Start
---           <CircleStop /> Stop
+---        <Button onClick={lmao} className="cursor-pointer" variant="outline" size="sm">
+---          <CirclePlay /> Start
+---          <CircleStop /> Stop
+--+        <Button onClick={toggle_detection} className="cursor-pointer" variant="outline" size="sm">
+--+          {isDetecting==0 ? (<><CirclePlay/> Start</>) : isDetecting==1 ? (<><CircleStop color="red"/> Stop</>) : (<Loader2 className="animate-spin"/>)}
+--+          
 --         </Button>
---+        <Button onClick={connect_client} className="cursor-pointer" variant="outline" size="sm">
---+          Connect
---+        </Button>
---       </div>
---       <div className="flex flex-1">
---       </div>
--diff --git a/electron/electron-env.d.ts b/electron/electron-env.d.ts
--index 1fdef4b..87e5587 100644
----- a/electron/electron-env.d.ts
--+++ b/electron/electron-env.d.ts
--@@ -1,4 +1,5 @@
-- /// <reference types="vite-plugin-electron/electron-env" />
--+import {Response} from './lib/receiver'
-- 
-- declare namespace NodeJS {
--   interface ProcessEnv {
--@@ -22,6 +23,14 @@ declare namespace NodeJS {
-- }
-- 
-- // Used in Renderer process, expose in `preload.ts`
---interface Window {
---  ipcRenderer: import('electron').IpcRenderer
--+declare global {
--+  interface Window {
--+    rasp_connection: {
--+      connect_client: (rasp_ip: string, rasp_port: number) => Promise<Response>
--+      send_startreq: () => Promise<Response>
--+      send_stopreq: () => Promise<Response>
--+    }
--+  }
-- }
--+
--+export {}
+--         <Button onClick={connect_client} className="cursor-pointer" variant="outline" size="sm">
+--           Connect
 -diff --git a/electron/lib/receiver.ts b/electron/lib/receiver.ts
--index d82b896..79e1309 100644
+-index 79e1309..40f8adc 100644
 ---- a/electron/lib/receiver.ts
 -+++ b/electron/lib/receiver.ts
--@@ -15,6 +15,12 @@ export enum Response {
--   ERROR_START     = 0x13,
--   SUCC_STOP       = 0x14,
--   ERROR_STOP      = 0x15,
--+  TIMEOUT         = 0x99,
--+}
--+
--+export interface PendingRequest {
--+  resolve: (res: Response) => void;
--+  timer: NodeJS.Timeout;
-- }
-- 
-- class ReceiverClient {
--@@ -22,46 +28,125 @@ class ReceiverClient {
--   rasp_port: number = 12345;
--   private port: number = 12345;
--   private client: net.Socket;
---  private udpListener: dgram.Socket;
---  
--+  private udpListener: dgram.Socket | null = null;
--+  private pendingRequests: PendingRequest[] = [];
--+  private receivedBuffer: Buffer = Buffer.alloc(0);
--+
--   constructor(){
--     this.client = new net.Socket();
---    this.client.on('data', this.processTCPResponse)
---    this.udpListener = dgram.createSocket('udp4');
---    this.udpListener.on('message', this.processUDPPacket)
--+    this.client.on('data', (data) => this.processTCPResponse(data))
+-@@ -148,12 +148,42 @@ class ReceiverClient {
+-     // Resolve oldest pending request
 -   }
--   
---  connectClient(rasp_ip: string, rasp_port: number){
--+
--+  private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
--+    return new Promise((resolve) => {
--+      // prepare packet
--+      const header = Buffer.alloc(8);
--+      header.writeUInt32BE(payload.length, 0);
--+      header.writeUInt32BE(cmd, 4);
--+      const packet = Buffer.concat([header, payload]);
--+      
--+      const timer = setTimeout(() => {
--+        const index = this.pendingRequests.findIndex(req => req.timer === timer);
--+        if (index !== -1){
--+          this.pendingRequests.splice(index, 1);
--+        }
--+        console.warn(`[TIMEOUT] Command ${cmd} timed out.`)
--+        resolve(Response.TIMEOUT);
--+      }, timeoutMs)
--+
--+      this.pendingRequests.push({ resolve, timer });
--+
--+      this.client.write(packet);
--+    })
--+  }
--+  connectClient(rasp_ip: string, rasp_port: number): Promise<void>{
--     this.rasp_port = rasp_port;
--     this.rasp_ip = rasp_ip;
---    this.client.connect(this.rasp_port, this.rasp_ip) // TODO: Add Error
--+    return new Promise((resolve, reject) => {
--+      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) // TODO: Add Error
--+      this.client.once('error', reject)
--+    })
--   }
-- 
--   sendStartRequest(){
--     // initialize the listener
---    this.udpListener.bind(this.port);
--+    
--+    if(this.udpListener){
--+      console.warn("Capture already started");
--+      return Promise.resolve(Response.SUCC_START)
--+    }
--+
--+    try {
--+      console.log("LMAOOO")
--+      this.udpListener = dgram.createSocket('udp4');
--+      this.udpListener.bind(this.port);
--+      this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo))
--+      this.udpListener.on('error', (err) => {
--+        console.error("UDP Error:", err);
--+        this.udpListener?.close();
--+        this.udpListener = null;
--+      })
--+      
--+    } catch (e) {
--+      console.error("Failed to bind UDP port", e);
--+      return Promise.resolve(Response.ERROR_START)
--+    }
--     
--     // prepare packet
--     const config = {
--       receiver_port: this.port
--     };
--+    const payload = Buffer.from(JSON.stringify(config), 'utf-8');
-- 
---    const payloadBuffer = Buffer.from(JSON.stringify(config), 'utf-8');
---    const header = Buffer.alloc(8);
---    header.writeUInt32BE(payloadBuffer.length, 0);
---    header.writeUInt32BE(Command.START_CAPTURE, 4);
---    const packet = Buffer.concat([header, payloadBuffer]);
---
--+    console.log("TESTINGGG")
--     // send packet
---    this.client.write(packet);
--+    return this.sendCommand(Command.START_CAPTURE, payload)
--   }
-- 
---  sendStopRequest(){
---    this.client.write(Buffer.from([Command.STOP_CAPTURE])); 
---    this.udpListener.close(); // Add notification system for notifying events
--+  async sendStopRequest(){
--+    const response = await this.sendCommand(Command.STOP_CAPTURE, Buffer.alloc(0))
--+    console.log("TESTINGGG2")
--+    if (this.udpListener){
--+      this.udpListener.close();
--+      this.udpListener = null;
--+    }
--+    return response;
--   }
-- 
---  private processTCPResponse(data: string | NonSharedBuffer) {}
--+  private processTCPResponse(data: string | NonSharedBuffer) {
--+    // Append new data to buffer
--+    this.receivedBuffer = Buffer.concat([this.receivedBuffer, Buffer.from(data)])
--+
--+    // Process complete message in buffer
--+
--+    while(true){
--+      if(this.receivedBuffer.length < 8) break;
--+      const length = this.receivedBuffer.readUInt32BE(0);
--+      const cmdID = this.receivedBuffer.readUInt32BE(4);
--+
--+      if (this.receivedBuffer.length < 8 + length) break
--+      
--+      this.receivedBuffer = this.receivedBuffer.subarray(8+length);
--+
--+      // Handle CONN_SUCCESS
--+
--+      if (cmdID === Response.CONN_SUCCESS) {
--+        console.log("Server Connected")
--+        continue;
--+      }
--+
--+      const req = this.pendingRequests.shift()
--+      if(req){
--+        clearTimeout(req.timer);
--+        req.resolve(cmdID as Response);
--+      } else {
--+        console.warn("Received response but no pending request: ", cmdID)
--+      }
--+    
--+    }
--+    // Resolve oldest pending request
--+  }
 -   private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
--     console.log(msg)
--     // decode
--diff --git a/electron/main.ts b/electron/main.ts
--index c05776a..4335c6b 100644
----- a/electron/main.ts
--+++ b/electron/main.ts
--@@ -50,9 +50,9 @@ function createWindow() {
+--    console.log(msg)
+--    // decode
+--    // image on buffer
+--    // send buffer to renderer
+--    // send buffer to inference
+--    // send buffer to write file system
+-+    try {
+-+      // Extract JSON Length
+-+      if (msg.length < 2) return;
+-+      const jsonLength = msg.readUInt16BE(0);
+-+      if (msg.length < 2 + jsonLength) {
+-+        console.warn("Packet too short for declared JSON length");
+-+        return;
+-+      }
+-+
+-+      // Extract GPS
+-+      const jsonStartIdx = 2;
+-+      const jsonEndIdx = 2 + jsonLength;
+-+      const jsonBuffer = msg.subarray(jsonStartIdx, jsonEndIdx);
+-+      const gpsData = JSON.parse(jsonBuffer.toString('utf-8'));
+-+
+-+      console.log("Telemetry Received: ", gpsData);
+-+
+-+      // Extract Image Data
+-+      const imageBuffer = msg.subarray(jsonEndIdx);
+-+
+-+      // Verify we actually have image data
+-+      if (imageBuffer.length === 0) return;
+-+
+-+      console.log("Image Data: ", imageBuffer)
+-+      // A. Send to Renderer (e.g., frontend via WebSocket)
+-+      // this.sendToRenderer(imageBuffer, gpsData);
+-+
+-+      // B. Send to Inference (e.g., Object detection)
+-+      // this.runInference(imageBuffer);
+-+
+-+      // C. Write to File System
+-+      // this.saveFrame(imageBuffer, gpsData);
+-+
+-+    } catch (err) {
+-+      console.error("Error decoding UDP packet:", err);
+-+    }
 -   }
--   const reciever = new ReceiverClient()
--   
---  ipcMain.handle('rasp_connection:connect_client', (event, data) => {
---    reciever.connectClient(data.rasp_ip, data.rasp_port)
---  })
--+  ipcMain.handle('rasp_connection:connect_client', (_, data) => reciever.connectClient(data.rasp_ip, data.rasp_port))
--+  ipcMain.handle('rasp_connection:send_startreq', () => reciever.sendStartRequest())
--+  ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
--   
 - }
 - 
--diff --git a/electron/preload.ts b/electron/preload.ts
--index 168ae2e..4b3641b 100644
----- a/electron/preload.ts
--+++ b/electron/preload.ts
--@@ -2,5 +2,7 @@ import { ipcRenderer, contextBridge } from 'electron'
-- 
-- // --------- Expose some API to the Renderer process ---------
-- contextBridge.exposeInMainWorld('rasp_connection', {
---  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port })
--+  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port }),
--+  send_startreq: () => ipcRenderer.invoke('rasp_connection:send_startreq'),
--+  send_stopreq: () => ipcRenderer.invoke('rasp_connection:send_stopreq')
-- })
--diff --git a/src/components/pages/page-detection.tsx b/src/components/pages/page-detection.tsx
--index 3b39b96..ca67a7f 100644
----- a/src/components/pages/page-detection.tsx
--+++ b/src/components/pages/page-detection.tsx
--@@ -1,17 +1,42 @@
-- import { Button } from "@/components/ui/button";
---import { CirclePlay, CircleStop } from "lucide-react";
--+import { CirclePlay, CircleStop, Loader2 } from "lucide-react";
--+import { useState } from "react";
--+
--+
--+enum Response {
--+  CONN_SUCCESS    = 0x10,
--+  CONN_FAIL       = 0x11,
--+  SUCC_START      = 0x12,
--+  ERROR_START     = 0x13,
--+  SUCC_STOP       = 0x14,
--+  ERROR_STOP      = 0x15,
--+  TIMEOUT         = 0x99,
--+}
-- 
-- function DetectionPage(){
---  const lmao = () => {}
--+  const [isDetecting, setIsDetecting] = useState(0) // 0 not detection, 1 detecting, 2 waiting for response
--   const connect_client = () => {
--     window.rasp_connection.connect_client("192.168.1.14", 12345)
--   }
--+  const toggle_detection = async () => {
--+    const is_detecting = (isDetecting === 0)? false : (isDetecting === 1)? true : null;
--+    setIsDetecting(2)
--+    if (is_detecting === true) {
--+      const response = await window.rasp_connection.send_stopreq()
--+      setIsDetecting((response === Response.SUCC_STOP)? 1 : 0)
--+    } else if (is_detecting === false) {
--+      const response = await window.rasp_connection.send_startreq()
--+      setIsDetecting((response === Response.SUCC_START)? 0 : 1)
--+    } else {
--+      
--+    }
--+  }
--   return (
--     <div className="flex flex-row h-full w-full">
--       <div className="hidden md:flex md:w-1/3 lg:w-90 ">
---        <Button onClick={lmao} className="cursor-pointer" variant="outline" size="sm">
---          <CirclePlay /> Start
---          <CircleStop /> Stop
--+        <Button onClick={toggle_detection} className="cursor-pointer" variant="outline" size="sm">
--+          {isDetecting==0 ? (<><CirclePlay/> Start</>) : isDetecting==1 ? (<><CircleStop color="red"/> Stop</>) : (<Loader2 className="animate-spin"/>)}
--+          
--         </Button>
--         <Button onClick={connect_client} className="cursor-pointer" variant="outline" size="sm">
--           Connect
 diff --git a/electron/lib/receiver.ts b/electron/lib/receiver.ts
-index 79e1309..40f8adc 100644
+index c69c1c3..eda3885 100644
 --- a/electron/lib/receiver.ts
 +++ b/electron/lib/receiver.ts
-@@ -148,12 +148,42 @@ class ReceiverClient {
-     // Resolve oldest pending request
-   }
-   private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo) {
--    console.log(msg)
--    // decode
--    // image on buffer
--    // send buffer to renderer
--    // send buffer to inference
--    // send buffer to write file system
-+    try {
-+      // Extract JSON Length
-+      if (msg.length < 2) return;
-+      const jsonLength = msg.readUInt16BE(0);
-+      if (msg.length < 2 + jsonLength) {
-+        console.warn("Packet too short for declared JSON length");
-+        return;
+@@ -41,6 +41,7 @@ class ReceiverClient {
+   private udpListener: dgram.Socket | null = null;
+   private pendingRequests: PendingRequest[] = [];
+   private receivedBuffer: Buffer = Buffer.alloc(0);
++  private inferenceServer: ChildProcess | null = null;
+ 
+   constructor(){
+     this.client = new net.Socket();
+@@ -98,6 +99,11 @@ class ReceiverClient {
+         this.udpListener = null;
+       })
+       
++
++      if(this.inferenceServer === null){
++        this.startInferenceServer()
++        
 +      }
-+
-+      // Extract GPS
-+      const jsonStartIdx = 2;
-+      const jsonEndIdx = 2 + jsonLength;
-+      const jsonBuffer = msg.subarray(jsonStartIdx, jsonEndIdx);
-+      const gpsData = JSON.parse(jsonBuffer.toString('utf-8'));
-+
-+      console.log("Telemetry Received: ", gpsData);
-+
-+      // Extract Image Data
-+      const imageBuffer = msg.subarray(jsonEndIdx);
-+
-+      // Verify we actually have image data
-+      if (imageBuffer.length === 0) return;
-+
-+      console.log("Image Data: ", imageBuffer)
-+      // A. Send to Renderer (e.g., frontend via WebSocket)
-+      // this.sendToRenderer(imageBuffer, gpsData);
-+
-+      // B. Send to Inference (e.g., Object detection)
-+      // this.runInference(imageBuffer);
-+
-+      // C. Write to File System
-+      // this.saveFrame(imageBuffer, gpsData);
-+
-+    } catch (err) {
-+      console.error("Error decoding UDP packet:", err);
-+    }
+     } catch (e) {
+       console.error("Failed to bind UDP port", e);
+       return Promise.resolve(Response.ERROR_START)
+@@ -202,8 +208,29 @@ class ReceiverClient {
+       console.error("Error decoding UDP packet:", err);
+     }
    }
++  private startInferenceServer(){
++    this.inferenceServer = spawn("")
++    
++    // connect to server
++    // 
++    
++    // prepare packet
++    // send packet
++
++    // setup server
++    // listen for events
++    // process image
++    // send back
++    // loop back to listening for events
++  }
++
  }
  
++
++export function startInference(){
++  const {pythonPath, scriptPath} = getPythonScript("inference.py")
++  spawn(pythonPath, [scriptPath])
++}
+ function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
+   const isWin = process.platform === 'win32';
+   const binaryName = isWin ? 'python.exe' : 'bin/python3';
+@@ -227,6 +254,8 @@ function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: s
+   console.log(baseResources)
+   console.log(pythonPath)
+   console.log(scriptPath)
++  
++
+ 
+   return { pythonPath, scriptPath };
+ }
+diff --git a/electron/main.ts b/electron/main.ts
+index 9f27402..855768a 100644
+--- a/electron/main.ts
++++ b/electron/main.ts
+@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
+ import { createRequire } from 'node:module'
+ import { fileURLToPath } from 'node:url'
+ import path from 'node:path'
+-import ReceiverClient from './lib/receiver'
++import ReceiverClient, { startInference } from './lib/receiver'
+ //import { ipcRenderer } from 'electron'
+ 
+ const require = createRequire(import.meta.url)
+@@ -60,6 +60,7 @@ function createWindow() {
+     })
+   })
+   ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
++  startInference()
+   
+ }
+ 
+diff --git a/src/state.tsx b/src/state.tsx
+index 1790396..d784929 100644
+--- a/src/state.tsx
++++ b/src/state.tsx
+@@ -31,6 +31,42 @@ export interface Session{
+   start_location: [number, number];
+   end_location: [number, number];
+ }
++//
++// location: [number, number], (First Image Detected)
++// timestamp: string, (First Image Detected)
++// 
++// mainImageUrl: string, (NODEJS)
++// 
++// id: string, (Inference)
++// classification: string, (Inference)
++// mainImageBoundingBox: string, (Inference)
++// croppedImageUrl: string, (Inference)
++// 
++// fixed: boolean,
++// archived: boolean,
++// 
++// 
++// LMAO
++// Associate Inference Request with Img
++// IMG_URL, location, timestamp -> Request ID
++// (mainImageUrl, location, timestamp)
++// 
++// RequestID, IMG_BUFFER, loc (for location calculation) -> Inference
++// Inference -> RequestID, DrawnImage, {BoundingBox, Classification, PotholeID, Calculated_Loc}[] // TODO: Make a MakeThumbnailAPI
++// 
++// - Main Image Stream * 
++// - Inference Image Stream
++// - Potholes List
++// 
++// id: string, /
++// location: [number, number], /
++// timestamp: string, /
++// classification: string, /
++// mainImageUrl: string, /
++// mainImageBoundingBox: string, /
++// croppedImageUrl: string, /
++// fixed: boolean,
++// archived: boolean,
+ 
+ const createRD = (
+   id: string,

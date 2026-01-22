@@ -7,6 +7,18 @@
   "directories": {
     "output": "release/${version}"
   },
+  "extraResources": [
+    {
+      "from": "resources/python/${os}",
+      "to": "python",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "resources/scripts",
+      "to": "app_scripts",
+      "filter": ["**/*"]
+    }
+  ],
   "files": [
     "dist",
     "dist-electron"

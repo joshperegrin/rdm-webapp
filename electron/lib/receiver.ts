@@ -1,5 +1,14 @@
 import net from "net"
 import dgram from "dgram"
+import { app } from 'electron'
+import path from 'node:path'
+import { ChildProcess, spawn } from "child_process"; 
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+
 
 export enum Command {
   HEARTBEAT       = 0x01,
@@ -195,4 +204,30 @@ class ReceiverClient {
   }
 }
 
+function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
+  const isWin = process.platform === 'win32';
+  const binaryName = isWin ? 'python.exe' : 'bin/python3';
+
+  // Define base directories based on environment
+  const baseResources = app.isPackaged
+    ? process.resourcesPath
+    : path.join(__dirname, '../resources');
+
+  // Construct paths
+  const pythonPath = app.isPackaged
+    ? path.join(baseResources, 'python', binaryName)
+    : path.join(baseResources, 'python/', (isWin? 'win': 'linux'), binaryName); // Note: verify if linux subfolder is needed for win32 dev
+
+  const scriptPath = app.isPackaged
+    ? path.join(baseResources, 'app_scripts', scriptName)
+    : path.join(baseResources, 'scripts', scriptName);
+
+  console.log(__dirname)
+  console.log(binaryName)
+  console.log(baseResources)
+  console.log(pythonPath)
+  console.log(scriptPath)
+
+  return { pythonPath, scriptPath };
+}
 export default ReceiverClient;
