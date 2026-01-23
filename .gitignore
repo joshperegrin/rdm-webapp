@@ -30,3 +30,4 @@ dist-electron/preload.mjs
 resources/python/win
 resources/python/linux
 resources/scripts/models
+resources/scripts/tracker/__pycache__
