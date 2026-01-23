@@ -1,7 +1,9 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import ReceiverClient from './lib/receiver'
+//import { ipcRenderer } from 'electron'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -31,6 +33,7 @@ function createWindow() {
     icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
+      contextIsolation: true,
     },
   })
 
@@ -45,10 +48,23 @@ function createWindow() {
     // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+  const reciever = new ReceiverClient()
+  
+  ipcMain.handle('rasp_connection:connect_client', (_, data) => reciever.connectClient(data.rasp_ip, data.rasp_port))
+  ipcMain.handle('rasp_connection:send_startreq', () => {
+    return reciever.sendStartRequest((buffer)=> {
+      const safeData = new Uint8Array(buffer);
+      if(win && !win.isDestroyed()){
+        win.webContents.send('preview-frame', safeData)
+      }
+    })
+  })
+  ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
+  
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
+// for appkications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

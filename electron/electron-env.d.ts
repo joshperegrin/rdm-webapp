@@ -1,4 +1,5 @@
 /// <reference types="vite-plugin-electron/electron-env" />
+import {Response} from './lib/receiver'
 
 declare namespace NodeJS {
   interface ProcessEnv {
@@ -22,6 +23,15 @@ declare namespace NodeJS {
 }
 
 // Used in Renderer process, expose in `preload.ts`
-interface Window {
-  ipcRenderer: import('electron').IpcRenderer
+declare global {
+  interface Window {
+    rasp_connection: {
+      connect_client: (rasp_ip: string, rasp_port: number) => Promise<Response>
+      send_startreq: () => Promise<Response>
+      send_stopreq: () => Promise<Response>
+      onPreviewFrame: (callback: (buffer: Uint8Array) => void) => void
+    }
+  }
 }
+
+export {}

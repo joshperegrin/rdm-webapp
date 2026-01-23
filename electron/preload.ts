@@ -1,24 +1,9 @@
 import { ipcRenderer, contextBridge } from 'electron'
 
 // --------- Expose some API to the Renderer process ---------
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
-  },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
-  },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.send(channel, ...omit)
-  },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.invoke(channel, ...omit)
-  },
-
-  // You can expose other APTs you need here.
-  // ...
+contextBridge.exposeInMainWorld('rasp_connection', {
+  connect_client: (rasp_ip: string, rasp_port: number) => ipcRenderer.invoke('rasp_connection:connect_client', { rasp_ip: rasp_ip, rasp_port: rasp_port }),
+  send_startreq: () => ipcRenderer.invoke('rasp_connection:send_startreq'),
+  send_stopreq: () => ipcRenderer.invoke('rasp_connection:send_stopreq'),
+  onPreviewFrame: (callback: (buffer: Uint8Array) => void) => {ipcRenderer.on('preview-frame', (_event, value) => callback(value))}
 })
