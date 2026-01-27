@@ -11,109 +11,69 @@ import {
   Session,
 } from "@/state";
 
-const FALLBACK_LOCATION = {
-  lat: 14.444134,
-  lng: 120.953242,
-  accuracy: 20,
-};
-
 function MapPage() {
-  /* Jotai from State */
   const [sessions] = useAtom(recentSessionsAtom);
   const [, setSelectedSessionID] = useAtom(selectedSessionID);
   const [session] = useAtom(selectedSession);
   const [rdLoadable] = useAtom(selectedSession_RD_loadable);
-
-  /* Leaflet */
   const mapRef = useRef<L.Map | null>(null);
-  const currentMarkerRef = useRef<L.Marker | null>(null);
-  const currentCircleRef = useRef<L.Circle | null>(null);
   const rdLayerRef = useRef<L.LayerGroup | null>(null);
-    const rdMarkersRef = useRef<Map<string, L.Marker>>(new Map());
-  const usingFallbackRef = useRef(true);
+  const rdMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  /* Map */
+  /* Placeholder functions for future implementation */
+  const markRoadDefectFixed = (rdId: string) => {
+    console.log("Mark Fixed:", rdId);
+    // TODO: Call backend or update state
+  };
+
+  const archiveRoadDefect = (rdId: string) => {
+    console.log("Archive:", rdId);
+    // TODO: Call backend or update state
+  };
+
   useEffect(() => {
     if (mapRef.current) return;
 
-    mapRef.current = L.map("map").setView(
-      [FALLBACK_LOCATION.lat, FALLBACK_LOCATION.lng],
-      15
-    );
+    mapRef.current = L.map("map");
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(mapRef.current);
 
-    // Current location marker (blue)
-    currentMarkerRef.current = L.marker([FALLBACK_LOCATION.lat, FALLBACK_LOCATION.lng], {
-      icon: L.icon({
-        iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-        shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-        iconSize: [25, 41],
-        iconAnchor: [12, 41],
-        popupAnchor: [1, -34],
-        shadowSize: [41, 41],
-      }),
-    }).addTo(mapRef.current);
-
-    currentCircleRef.current = L.circle([FALLBACK_LOCATION.lat, FALLBACK_LOCATION.lng], {
-      radius: FALLBACK_LOCATION.accuracy,
-      color: "blue",
-      fillOpacity: 0.1,
-    }).addTo(mapRef.current);
-
-    // Layer group for RD markers
     rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
 
-    /* ---------- GPS POLLING (ELECTRON) ---------- */
-    const interval = setInterval(async () => {
-      try {
-        const location = await window.electronAPI.getLocation();
-        const isValidGPS =
-          location &&
-          location.lat !== 0 &&
-          location.lng !== 0 &&
-          !Number.isNaN(location.lat) &&
-          !Number.isNaN(location.lng);
-
-        const lat = isValidGPS ? location.lat : FALLBACK_LOCATION.lat;
-        const lng = isValidGPS ? location.lng : FALLBACK_LOCATION.lng;
-        const accuracy = isValidGPS ? location.accuracy ?? 10 : FALLBACK_LOCATION.accuracy;
-
-        currentMarkerRef.current?.setLatLng([lat, lng]);
-        currentCircleRef.current?.setLatLng([lat, lng]).setRadius(accuracy);
-
-        if (isValidGPS && usingFallbackRef.current) {
-          usingFallbackRef.current = false;
-          mapRef.current?.setView([lat, lng], 18);
-        }
-      } catch {
-        // silent fallback
-      }
-    }, 1000);
-
     return () => {
-      clearInterval(interval);
       mapRef.current?.remove();
       mapRef.current = null;
-      currentMarkerRef.current = null;
-      currentCircleRef.current = null;
       rdLayerRef.current = null;
       rdMarkersRef.current.clear();
     };
   }, []);
 
-  /* ---------- UPDATE RD MARKERS ---------- */
+  /* markers */
   useEffect(() => {
     if (!mapRef.current || !rdLayerRef.current) return;
 
     rdLayerRef.current.clearLayers();
     rdMarkersRef.current.clear();
 
-    if (rdLoadable.state !== "hasData") return;
+    let rdList: any[] = [];
 
-    const rdList = rdLoadable.data;
+    if (rdLoadable.state === "hasData") {
+      rdList = rdLoadable.data;
+    }
+
+    if (!session) {
+      sessions.forEach((s: any) => {
+        if (s.road_defects) {
+          rdList.push(...s.road_defects);
+        }
+      });
+    }
+
+    if (rdList.length === 0) return;
+
+    const bounds = L.latLngBounds([]);
 
     rdList.forEach((rd) => {
       const [lat, lng] = rd.location;
@@ -122,8 +82,10 @@ function MapPage() {
 
       const marker = L.marker([lat, lng], {
         icon: L.icon({
-          iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-          shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+          iconUrl:
+            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
+          shadowUrl:
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
           iconSize: [25, 41],
           iconAnchor: [12, 41],
           popupAnchor: [1, -34],
@@ -137,13 +99,19 @@ function MapPage() {
 
       rdLayerRef.current?.addLayer(marker);
       rdMarkersRef.current.set(rd.id, marker);
+
+      bounds.extend([lat, lng]);
     });
+
+    if (bounds.isValid()) {
+      mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+    }
   }, [rdLoadable]);
 
   return (
     <div className="flex h-full w-full">
 
-      {/* Select Sessison */}
+      {/* Select Session */}
       <div className="hidden md:flex md:w-1/4 lg:w-80 flex-col bg-slate-800 p-4 text-white">
         <h2 className="font-semibold mb-4">Sessions</h2>
 
@@ -207,16 +175,30 @@ function MapPage() {
                     <li
                       key={idx}
                       className="p-2 rounded bg-slate-700 text-xs cursor-pointer hover:bg-slate-600 transition"
-                      onClick={() => {
-                        const marker = rdMarkersRef.current.get(rd.id);
-                        if (!marker || !mapRef.current) return;
-                        mapRef.current.setView(marker.getLatLng(), 18);
-                        marker.openPopup();
-                      }}
                     >
                       <div><b>Type:</b> {rd.classification || "Unknown"}</div>
                       <div><b>Location:</b> {rd.location[0]}, {rd.location[1]}</div>
                       <div><b>Status:</b> {rd.fixed ? "Fixed" : "Unfixed"}</div>
+
+                      {/* Archive & Fixed buttons */}
+                      {/*<div className="flex gap-2 mt-1">
+                        {!rd.fixed && (
+                          <button
+                            className="px-2 py-1 text-xs bg-green-600 rounded hover:bg-green-500"
+                            onClick={() => markRoadDefectFixed(rd.id)}
+                          >
+                            Mark Fixed
+                          </button>
+                        )}
+                        {!rd.archived && (
+                          <button
+                            className="px-2 py-1 text-xs bg-red-600 rounded hover:bg-red-500"
+                            onClick={() => archiveRoadDefect(rd.id)}
+                          >
+                            Archive
+                          </button>
+                        )}
+                      </div>*/}
                     </li>
                   );
                 })}

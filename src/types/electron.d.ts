@@ -11,3 +11,12 @@ declare global {
     };
   }
 }
+
+declare global {
+  interface Window {
+    db: {
+      getSessions: () => Promise<Session[]>;
+      getRoadDefects: (sessionId: string) => Promise<any[]>;
+    };
+  }
+}
