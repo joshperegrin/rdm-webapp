@@ -3,7 +3,14 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import ReceiverClient from './lib/receiver'
-//import { ipcRenderer } from 'electron'
+
+import { 
+  getRoadDefectsBySession, 
+  markRoadDefectFixed, 
+  archiveRoadDefect, 
+  getAllSessions,
+} from './database/road.defect.model'
+import db from './database/db'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -37,7 +44,6 @@ function createWindow() {
     },
   })
 
-  // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
@@ -45,7 +51,6 @@ function createWindow() {
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
   const reciever = new ReceiverClient()
@@ -61,6 +66,22 @@ function createWindow() {
   })
   ipcMain.handle('rasp_connection:send_stopreq', async () => reciever.sendStopRequest())
   
+  ipcMain.handle('db:get-sessions', async () => {
+     return await getAllSessions();
+  });
+
+  ipcMain.handle('db:get-road-defects', async (_, sessionId: number) => {
+    return await getRoadDefectsBySession(sessionId);
+  });
+
+  ipcMain.handle('db:mark-fixed', async (_, rdId: number) => {
+    return await markRoadDefectFixed(rdId);
+  });
+
+  ipcMain.handle('db:archive', async (_, rdId: number) => {
+    return await archiveRoadDefect(rdId);
+  });
+
 }
 
 // Quit when all windows are closed, except on macOS. There, it's common

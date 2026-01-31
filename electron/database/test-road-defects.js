@@ -1,4 +1,4 @@
-import { getListOfSessions, getSessionWithRoadDefects } from './road.defect.model.js';
+import { getListOfSessions, getSessionWithRoadDefects } from './road.defect.model.ts';
 
 console.log("=== All Sessions ===");
 console.log(getListOfSessions());

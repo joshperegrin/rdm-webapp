@@ -23,9 +23,9 @@ INSERT INTO road_defects (
     is_archived
 )
 VALUES
-(1, 14.444210, 120.953310, 'Pothole', 'Bacoor', 'thumbnails/rd1.jpg', 0, 0),
-(1, 14.444810, 120.953910, 'Crack', 'Bacoor', 'thumbnails/rd2.jpg', 1, 0),
-(2, 14.441210, 120.951120, 'Alligator Crack', 'Bacoor', 'thumbnails/rd3.jpg', 0, 0);
+(1, 14.444210, 120.953317, 'Pothole', 'Malabon', 'thumbnails/rd1.jpg', 0, 0),
+(1, 14.444810, 120.953920, 'Crack', 'Mandaluyong', 'thumbnails/rd2.jpg', 1, 0),
+(2, 14.441210, 120.951120, 'Alligator Crack', 'Gensan', 'thumbnails/rd3.jpg', 0, 0);
 
 -- DETECTIONS
 INSERT INTO detections (
@@ -37,6 +37,6 @@ INSERT INTO detections (
     calc_lng
 )
 VALUES
-(1, 1, '[120,45,200,150]', 'Pothole', 14.444210, 120.953310),
+(1, 1, '[120,45,200,150]', 'Pothole', 14.444210, 120.953315),
 (2, 2, '[80,30,160,110]', 'Crack', 14.444810, 120.953910),
-(3, 3, '[50,40,180,160]', 'Alligator Crack', 14.441210, 120.951120);
+(3, 3, '[50,40,180,160]', 'Alligator Crack', 14.441210, 120.951127);

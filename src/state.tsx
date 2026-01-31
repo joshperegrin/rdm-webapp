@@ -62,6 +62,7 @@ export const latestDetected_RD_Atom = atom(
     return list.length > 0 ? list[list.length - 1] : undefined;
   }
 )
+export const defectsRefreshAtom = atom(0);
 
 // Recent Sessions (paginated)
 // potholes for selected session
@@ -72,52 +73,67 @@ export const latestDetected_RD_Atom = atom(
 // atom store to update the filtered session
 // 
 
-export const recentSessionsAtom = atom<Session[]>([
-  {
-    id: "session-001",
-    timestamp: "2025-01-10 08:30",
-    start_location: [14.444134, 120.953242],
-    end_location: [14.4455, 120.9548],
-  },
-  {
-    id: "session-002",
-    timestamp: "2025-01-11 09:15",
-    start_location: [14.4400, 120.9500],
-    end_location: [14.4480, 120.9600],
-  },
-])
+//Update Recent Sessions Atom to fetch from DB
+export const recentSessionsAtom = atom(async () => {
+  try {
+    if (!window.database) return [];
+    
+    const dbSessions = await window.database.getSessions();
+    
+    // --- UPDATE THIS MAPPING ---
+    return dbSessions.map((s: any) => ({
+      id: `session-${s.session_id}`,
+      timestamp: s.timestamp,
+      start_location: [s.start_lat, s.start_lng],
+      end_location: [s.end_lat, s.end_lng],
+    })) as Session[];
+
+  } catch (error) {
+    console.error("Error loading sessions:", error);
+    return [];
+  }
+});
 
 export const selectedSessionID = atom("")
 
 export const selectedSession = atom(
-  (get) => {
-    const sessions = get(recentSessionsAtom)
+  async (get) => {
+    const sessions = await get(recentSessionsAtom)
     const id = get(selectedSessionID)
     return sessions.find((s) => s.id === id) ?? null
   }
 )
-export const selectedSession_RD_Atom = atom(
-  async (get) => {
-    const id = get(selectedSessionID)
-    if(id === ""){
-      return []
-    } 
 
-    // test data per session
-    if(id === "session-001") {
-      return [
-        createRD("TUP", [14.4445, 120.9548], "2025-01-10 08:45", "Pothole", "", "", "", false, false),
-        createRD("TUP-2", [14.4448, 120.9550], "2025-01-10 08:50", "Crack", "", "", "", true, false),
-      ]
-    } else if(id === "session-002") {
-      return [
-        createRD("TUP-3", [14.4410, 120.9510], "2025-01-11 09:30", "Pothole", "", "", "", false, false),
-      ]
-    } else {
-      return []
-    }
+//Update Selected Session Defects Atom
+export const selectedSession_RD_Atom = atom(async (get) => {
+  get(defectsRefreshAtom);
+  const idStr = get(selectedSessionID);
+  
+  // para session-1 ganon itsura nya
+  const numericId = parseInt(idStr.replace(/\D/g, ''), 10);
+  
+  if (isNaN(numericId) || idStr === "") return [];
+
+  try {
+    const dbResult = await window.database.getRoadDefectsBySession(numericId);
+
+    // Map DB result to your Interface
+    return dbResult.map((row: any) => createRD(
+      row.road_defects_id.toString(),
+      [row.ave_lat, row.ave_lng],
+      "2025-01-01",
+      row.ave_classification,
+      row.thumbnail_path || "",
+      "",
+      row.thumbnail_path || "",
+      row.is_fixed === 1,
+      row.is_archived === 1
+    ));
+  } catch (error) {
+    console.error("Error loading defects:", error);
+    return [];
   }
-)
+});
 
 export const selectedSession_RD_loadable = loadable(selectedSession_RD_Atom)
 
@@ -177,3 +193,6 @@ export function setDetectionImageFrame(buffer: Buffer){
     store.set(imgUrlAtom, URL.createObjectURL(blob));
   }
 }
+
+export const recentSessionsLoadable = loadable(recentSessionsAtom);
+export const selectedSessionLoadable = loadable(selectedSession);

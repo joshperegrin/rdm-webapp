@@ -2,13 +2,8 @@ import net from "net"
 import dgram from "dgram"
 import { app } from 'electron'
 import path from 'node:path'
-import { ChildProcess, spawn } from "child_process"; 
-import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-
+// REMOVED: const __filename / __dirname polyfills (They cause conflicts)
 
 export enum Command {
   HEARTBEAT       = 0x01,
@@ -48,10 +43,8 @@ class ReceiverClient {
     this.client.on('data', (data) => this.processTCPResponse(data))
   }
   
-
   private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
     return new Promise((resolve) => {
-      // prepare packet
       const header = Buffer.alloc(8);
       header.writeUInt32BE(payload.length, 0);
       header.writeUInt32BE(cmd, 4);
@@ -67,29 +60,26 @@ class ReceiverClient {
       }, timeoutMs)
 
       this.pendingRequests.push({ resolve, timer });
-
       this.client.write(packet);
     })
   }
+
   connectClient(rasp_ip: string, rasp_port: number): Promise<void>{
     this.rasp_port = rasp_port;
     this.rasp_ip = rasp_ip;
     return new Promise((resolve, reject) => {
-      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) // TODO: Add Error
+      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) 
       this.client.once('error', reject)
     })
   }
 
   sendStartRequest(previewCallback: (buffer: Buffer) => void){
-    // initialize the listener
-    
     if(this.udpListener){
       console.warn("Capture already started");
       return Promise.resolve(Response.SUCC_START)
     }
 
     try {
-      // create listener for raspberry pi stream
       this.udpListener = dgram.createSocket('udp4');
       this.udpListener.bind(this.port);
       this.udpListener.on('message', (msg, rinfo) => this.processUDPPacket(msg, rinfo, previewCallback))
@@ -99,7 +89,6 @@ class ReceiverClient {
         this.udpListener = null;
       })
       
-      // create a sender for sending frames for inference
       this.udpInferenceSender = dgram.createSocket('udp4');
       this.udpInferenceSender.on("message", (msg, rinfo) => this.handleInferenceMessage(msg, rinfo, previewCallback))
       this.udpInferenceSender.on('error', (err) => {
@@ -112,20 +101,13 @@ class ReceiverClient {
       return Promise.resolve(Response.ERROR_START)
     }
     
-    // prepare packet
-    const config = {
-      receiver_port: this.port
-    };
+    const config = { receiver_port: this.port };
     const payload = Buffer.from(JSON.stringify(config), 'utf-8');
-
-    console.log("TESTINGGG")
-    // send packet
     return this.sendCommand(Command.START_CAPTURE, payload)
   }
 
   async sendStopRequest(){
     const response = await this.sendCommand(Command.STOP_CAPTURE, Buffer.alloc(0))
-    console.log("TESTINGGG2")
     if (this.udpListener){
       this.udpListener.close();
       this.udpListener = null;
@@ -133,11 +115,8 @@ class ReceiverClient {
     return response;
   }
 
-  private processTCPResponse(data: string | NonSharedBuffer) {
-    // Append new data to buffer
+  private processTCPResponse(data: string | Buffer) {
     this.receivedBuffer = Buffer.concat([this.receivedBuffer, Buffer.from(data)])
-
-    // Process complete message in buffer
 
     while(true){
       if(this.receivedBuffer.length < 8) break;
@@ -148,8 +127,6 @@ class ReceiverClient {
       
       this.receivedBuffer = this.receivedBuffer.subarray(8+length);
 
-      // Handle CONN_SUCCESS
-
       if (cmdID === Response.CONN_SUCCESS) {
         console.log("Server Connected")
         continue;
@@ -159,34 +136,24 @@ class ReceiverClient {
       if(req){
         clearTimeout(req.timer);
         req.resolve(cmdID as Response);
-      } else {
-        console.warn("Received response but no pending request: ", cmdID)
       }
-    
     }
-    // Resolve oldest pending request
   }
-  private processUDPPacket(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void) {
+
+  private processUDPPacket(msg: Buffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void) {
     try {
-      // Extract JSON Length
       if (msg.length < 2) return;
       const jsonLength = msg.readUInt16BE(0);
-      if (msg.length < 2 + jsonLength) {
-        console.warn("Packet too short for declared JSON length");
-        return;
-      }
+      if (msg.length < 2 + jsonLength) return;
 
-      // Extract Image Data
       const imageBuffer = msg.subarray(2 + jsonLength);
       if (imageBuffer.length === 0) return;
 
-      // Prepend the LivePreview Toggle
       const prependByte = this.liveInferencePreview? 0x01 : 0x00;
       const newMsg = Buffer.allocUnsafe(msg.length + 1)
       newMsg[0] = prependByte;
       msg.copy(newMsg, 1)
       
-      // Send Data
       if(!this.liveInferencePreview) previewCallback(imageBuffer)
       this.udpInferenceSender?.send(newMsg, 9123, "127.0.0.1")
 
@@ -194,36 +161,33 @@ class ReceiverClient {
       console.error("Error decoding UDP packet:", err);
     }
   }
-  private handleInferenceMessage(msg: NonSharedBuffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void){
+
+  private handleInferenceMessage(msg: Buffer, rinfo: dgram.RemoteInfo, previewCallback: (buffer: Buffer) => void){
     console.log("Inference Received")
   }
-
 }
 
+// --- FIXED FUNCTION ---
 export function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
   const isWin = process.platform === 'win32';
   const binaryName = isWin ? 'python.exe' : 'bin/python3';
 
-  // Define base directories based on environment
+  // FIX: Use process.cwd() in dev (Project Root) or resourcesPath in prod
+  // This avoids the need for __dirname or __filename completely.
   const baseResources = app.isPackaged
     ? process.resourcesPath
-    : path.join(__dirname, '../resources');
+    : path.join(process.cwd(), 'resources'); 
 
   // Construct paths
   const pythonPath = app.isPackaged
     ? path.join(baseResources, 'python', binaryName)
-    : path.join(baseResources, 'python/', (isWin? 'win': 'linux'), binaryName); // Note: verify if linux subfolder is needed for win32 dev
+    : path.join(baseResources, 'python/', (isWin? 'win': 'linux'), binaryName);
 
   const scriptPath = app.isPackaged
     ? path.join(baseResources, 'app_scripts', scriptName)
     : path.join(baseResources, 'scripts', scriptName);
 
-  console.log(__dirname)
-  console.log(binaryName)
-  console.log(baseResources)
-  console.log(pythonPath)
-  console.log(scriptPath)
-
   return { pythonPath, scriptPath };
 }
+
 export default ReceiverClient;
