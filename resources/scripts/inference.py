@@ -6,7 +6,6 @@ import numpy as np
 from ai_edge_litert.interpreter import Interpreter
 
 # --- TRACKER IMPORTS ---
-# Ensure you have 'tracker' folder with __init__.py in the same directory
 from tracker.byte_tracker import BYTETracker
 
 # --- CONFIGURATION ---
@@ -14,6 +13,25 @@ UDP_IP = "0.0.0.0"
 UDP_PORT = 9123
 BUFFER_SIZE = 65535
 MODEL_PATH = "./models/1.tflite"
+
+def get_iou(box1, box2):
+    """
+    Calculates IoU between two bounding boxes (x1, y1, x2, y2).
+    """
+    xx1 = max(box1[0], box2[0])
+    yy1 = max(box1[1], box2[1])
+    xx2 = min(box1[2], box2[2])
+    yy2 = min(box1[3], box2[3])
+
+    w = max(0, xx2 - xx1)
+    h = max(0, yy2 - yy1)
+    
+    intersection = w * h
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = area1 + area2 - intersection
+
+    return intersection / union if union > 0 else 0 
 
 # ByteTrack requires an arguments object to initialize
 class TrackerArgs:
@@ -91,11 +109,14 @@ try:
             scores = interpreter.get_tensor(output_details[2]['index'])[0] 
             count = int(interpreter.get_tensor(output_details[3]['index'])[0])
 
+
+
             # 4. Format Detections for ByteTrack
             # ByteTrack expects: [[x1, y1, x2, y2, score], ...] in ABSOLUTE pixels
             
             detections = []
-            
+            raw_detections = []
+
             # TFLite usually outputs fixed size arrays (e.g., 10 or 25), 
             # we only care about the valid 'count'.
             for i in range(count):
@@ -104,6 +125,8 @@ try:
                     continue
                 
                 # TFLite Box: [ymin, xmin, ymax, xmax] (Normalized 0-1)
+                class_id = int(classes[i])
+
                 ymin, xmin, ymax, xmax = boxes[i]
                 
                 # Convert to Absolute Pixels (Original Frame Scale)
@@ -114,9 +137,11 @@ try:
                 y2 = ymax * orig_h
                 
                 detections.append([x1, y1, x2, y2, score])
+                raw_detections.append([x1, y1, x2, y2, score, class_id])
 
             # Convert to numpy array
             detections = np.array(detections)
+            raw_detections = np.array(raw_detections)
 
             # 5. Update Tracker
             # We pass (orig_h, orig_w) for both img_info and img_size. 
@@ -131,6 +156,27 @@ try:
                 )
             
             # 6. Process/Visualize Tracks
+            for t in online_targets:
+                track_box = t.tlbr
+                best_iou = 0
+                best_class = -1
+
+                if len(raw_detections) > 0:
+                    for rd in raw_detections:
+                        det_box = rd[:4]
+                        det_class = int(rd[5])
+
+                        iou = get_iou(track_box, det_box)
+
+                        if iou > 0.5 and iou > best_iou:
+                            best_iou = iou
+                            best_class = det_class
+
+                if best_class != -1:
+                    t.class_id = best_class
+
+                current_class = getattr(t, 'class_id', -1)
+                print(f"ID: {t.track_id} | Class: {current_class} | Box: {track_box}")
             print(f"Frame Tracks: {len(online_targets)}")
             
             # Optional: Show window (if running on desktop/GUI env)
