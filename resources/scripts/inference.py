@@ -176,7 +176,24 @@ try:
                     t.class_id = best_class
 
                 current_class = getattr(t, 'class_id', -1)
+
+                x1, y1, x2, y2 = map(int, track_box)
+
+                color = (0, 255, 0)
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+                label = f"ID: {t.track_id} | Class: {current_class}"
+
+                (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                cv2.rectangle(frame, (x1, y1 - 20), (x1 + w, y1), color, -1)
+
+                cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                
                 print(f"ID: {t.track_id} | Class: {current_class} | Box: {track_box}")
+
+            if len(raw_detections) > 0:
+                cv2.imwrite("latest_inference.jpg", frame)
             print(f"Frame Tracks: {len(online_targets)}")
             
             # Optional: Show window (if running on desktop/GUI env)
