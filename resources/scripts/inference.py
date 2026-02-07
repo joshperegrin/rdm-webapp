@@ -70,8 +70,35 @@ except Exception as e:
 # --- MAIN LOOP ---
 try: 
     while True:
-        # 1. Receive Data
-        data, addr = sock.recvfrom(BUFFER_SIZE)
+        # --- 1. Receive Latest Data (Buffer Drain Strategy) ---
+        latest_data = None
+        latest_addr = None
+
+        # Set socket to non-blocking to clear out the queue
+        sock.setblocking(False)
+        
+        try:
+            while True:
+                # Keep reading until an exception is raised (buffer empty)
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+                latest_data = data
+                latest_addr = addr
+        except BlockingIOError:
+            # No more data in buffer
+            pass
+
+        # Restore blocking mode
+        sock.setblocking(True)
+
+        # Decide which data to use
+        if latest_data is None:
+            # If buffer was empty, wait for the next fresh packet
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+        else:
+            # Use the freshest packet we found in the buffer
+            data, addr = latest_data, latest_addr
+
+        # --- Standard Validation ---
         if len(data) < 3:
             continue
 
@@ -108,8 +135,6 @@ try:
             classes = interpreter.get_tensor(output_details[1]['index'])[0] 
             scores = interpreter.get_tensor(output_details[2]['index'])[0] 
             count = int(interpreter.get_tensor(output_details[3]['index'])[0])
-
-
 
             # 4. Format Detections for ByteTrack
             # ByteTrack expects: [[x1, y1, x2, y2, score], ...] in ABSOLUTE pixels
@@ -195,7 +220,7 @@ try:
             if len(raw_detections) > 0:
                 cv2.imwrite("latest_inference.jpg", frame)
             print(f"Frame Tracks: {len(online_targets)}")
-            
+
             # Optional: Show window (if running on desktop/GUI env)
             # cv2.imshow("Tracking", frame)
             # if cv2.waitKey(1) & 0xFF == ord('q'):
