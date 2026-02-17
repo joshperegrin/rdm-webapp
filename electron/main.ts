@@ -3,6 +3,13 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import ReceiverClient from './lib/receiver'
+import { 
+  getRoadDefectsBySession, 
+  markRoadDefectFixed, 
+  archiveRoadDefect, 
+  getAllSessions,
+} from './database/road.defect.model'
+import db from './database/db'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -23,14 +30,13 @@ const receiver = new ReceiverClient()
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC!, 'electron-vite.svg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
     },
   })
 
-  // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
@@ -58,7 +64,6 @@ function createWindow() {
       }
     })
   })
-
   // 3. Stop Capture
   ipcMain.handle('rasp_connection:send_stopreq', async () => receiver.sendStopRequest())
 
@@ -78,6 +83,22 @@ function createWindow() {
       win.webContents.send('inference-data', data)
     }
   })
+  
+  ipcMain.handle('db:get-sessions', async () => {
+     return await getAllSessions();
+  });
+
+  ipcMain.handle('db:get-road-defects', async (_, sessionId: number) => {
+    return await getRoadDefectsBySession(sessionId);
+  });
+
+  ipcMain.handle('db:mark-fixed', async (_, rdId: number) => {
+    return await markRoadDefectFixed(rdId);
+  });
+
+  ipcMain.handle('db:archive', async (_, rdId: number) => {
+    return await archiveRoadDefect(rdId);
+  });
 }
 
 app.on('window-all-closed', () => {

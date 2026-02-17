@@ -14,6 +14,8 @@ export interface InferenceData {
   box: [number, number, number, number]; // x1, y1, x2, y2
 }
 
+// REMOVED: const __filename / __dirname polyfills (They cause conflicts)
+
 export enum Command {
   HEARTBEAT       = 0x01,
   START_CAPTURE   = 0x02,
@@ -65,7 +67,6 @@ class ReceiverClient {
 
   private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
     return new Promise((resolve) => {
-      // prepare packet
       const header = Buffer.alloc(8);
       header.writeUInt32BE(payload.length, 0);
       header.writeUInt32BE(cmd, 4);
@@ -81,7 +82,6 @@ class ReceiverClient {
       }, timeoutMs)
 
       this.pendingRequests.push({ resolve, timer });
-
       this.client.write(packet);
     })
   }
@@ -175,8 +175,6 @@ class ReceiverClient {
       if(req){
         clearTimeout(req.timer);
         req.resolve(cmdID as Response);
-      } else {
-        console.warn("Received response but no pending request: ", cmdID)
       }
     }
   }
@@ -188,7 +186,6 @@ class ReceiverClient {
       const jsonLength = msg.readUInt16BE(0);
       if (msg.length < 2 + jsonLength) return;
 
-      // Extract Image Data
       const imageBuffer = msg.subarray(2 + jsonLength);
       if (imageBuffer.length === 0) return;
 
@@ -205,6 +202,7 @@ class ReceiverClient {
       msg.copy(newMsg, 1)
       
       // Send to Python Inference Server
+      if(!this.liveInferencePreview) previewCallback(imageBuffer)
       this.udpInferenceSender?.send(newMsg, 9123, "127.0.0.1")
 
     } catch (err) {
@@ -242,16 +240,18 @@ class ReceiverClient {
         console.error("Error parsing inference response:", e);
       }
   }
-
 }
 
+// --- FIXED FUNCTION ---
 export function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
   const isWin = process.platform === 'win32';
   const binaryName = isWin ? 'python.exe' : 'bin/python3';
 
+  // FIX: Use process.cwd() in dev (Project Root) or resourcesPath in prod
+  // This avoids the need for __dirname or __filename completely.
   const baseResources = app.isPackaged
     ? process.resourcesPath
-    : path.join(__dirname, '../resources');
+    : path.join(process.cwd(), 'resources'); 
 
   const pythonPath = app.isPackaged
     ? path.join(baseResources, 'python', binaryName)
