@@ -32,6 +32,11 @@ export interface Session{
   end_location: [number, number];
 }
 
+export interface ReportsData {
+  sessions: any[];
+  allDefects: any[];
+}
+
 const createRD = (
   id: string,
   location: [number, number],
@@ -194,5 +199,31 @@ export function setDetectionImageFrame(buffer: Buffer){
   }
 }
 
+export const reportsAtom = atom(async (get) => {
+  get(defectsRefreshAtom); 
+
+  try {
+    if (!window.database) return { sessions: [], allDefects: [] };
+
+    const rawSessions = await window.database.getSessions();
+    const defectPromises = rawSessions.map((s: any) => 
+      window.database.getRoadDefectsBySession(s.session_id)
+    );
+    
+    const defectsArrays = await Promise.all(defectPromises);
+    const allDefects = defectsArrays.flat();
+
+    return { 
+      sessions: rawSessions, 
+      allDefects: allDefects 
+    };
+
+  } catch (error) {
+    console.error("Error loading reports:", error);
+    return { sessions: [], allDefects: [] };
+  }
+});
+
+export const reportsLoadable = loadable(reportsAtom);
 export const recentSessionsLoadable = loadable(recentSessionsAtom);
 export const selectedSessionLoadable = loadable(selectedSession);
