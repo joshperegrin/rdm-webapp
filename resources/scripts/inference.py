@@ -3,6 +3,8 @@ import struct
 import json
 import cv2
 import numpy as np
+import os
+import sys
 from ai_edge_litert.interpreter import Interpreter
 from tracker.byte_tracker import BYTETracker
 
@@ -10,7 +12,10 @@ from tracker.byte_tracker import BYTETracker
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9123
 BUFFER_SIZE = 65535
-MODEL_PATH = "./models/1.tflite"
+# MODEL_PATH = "./models/1.tflite"
+# DEFAULT_OUTPUT_DIR = "./captures/default"
+MODEL_PATH = "resources/scripts/models/1.tflite"
+DEFAULT_OUTPUT_DIR = "resources/scripts/captures/default"
 
 def get_iou(box1, box2):
     """ Calculates IoU between two bounding boxes (x1, y1, x2, y2). """
@@ -38,6 +43,14 @@ class TrackerArgs:
 
 tracker_args = TrackerArgs()
 tracker = BYTETracker(tracker_args, frame_rate=30)
+saved_frame_count = 0
+output_base_dir = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUTPUT_DIR
+frames_dir = os.path.join(output_base_dir, "frames")
+crops_dir = os.path.join(output_base_dir, "crops")
+os.makedirs(frames_dir, exist_ok=True)
+os.makedirs(crops_dir, exist_ok=True)
+print(f"[INFO]: Saving detected frames to {frames_dir}")
+print(f"[INFO]: Saving detected crops to {crops_dir}")
 
 # --- NETWORK SETUP ---
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -98,6 +111,7 @@ try:
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
         if frame is None: continue
+        frame_for_saving = frame.copy()
 
         # --- 3. Pre-process for Model ---
         orig_h, orig_w = frame.shape[:2]
@@ -173,6 +187,17 @@ try:
             })
             print(f"ID: {t.track_id} | Class: {current_class} | Box: {track_box}") 
 
+            # Save crop for each tracked object using tracking ID as filename.
+            x1, y1, x2, y2 = map(int, track_box)
+            x1 = max(0, min(x1, orig_w - 1))
+            y1 = max(0, min(y1, orig_h - 1))
+            x2 = max(0, min(x2, orig_w))
+            y2 = max(0, min(y2, orig_h))
+            if x2 > x1 and y2 > y1:
+                crop = frame_for_saving[y1:y2, x1:x2]
+                if crop.size > 0:
+                    crop_path = os.path.join(crops_dir, f"{int(t.track_id)}.jpg")
+                    cv2.imwrite(crop_path, crop)
 
             # Only Draw if Preview is Requested
             if is_live_preview:
@@ -184,6 +209,11 @@ try:
                 cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         # --- 7. Construct Response Packet ---
+        if len(tracked_objects) > 0:
+            saved_frame_count += 1
+            frame_path = os.path.join(frames_dir, f"frame-{saved_frame_count}.jpg")
+            cv2.imwrite(frame_path, frame_for_saving)
+
         json_str = json.dumps(tracked_objects)
         json_bytes = json_str.encode('utf-8')
         json_length = len(json_bytes)

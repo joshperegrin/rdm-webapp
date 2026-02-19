@@ -4,6 +4,7 @@ import { app } from 'electron'
 import path from 'node:path'
 import { ChildProcess, spawn } from "child_process"; 
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -52,6 +53,7 @@ class ReceiverClient {
   private receivedBuffer: Buffer = Buffer.alloc(0);
   private udpInferenceSender: dgram.Socket | null = null;
   private inferenceServer: ChildProcess | null = null;
+  private inferenceOutputPath: string | null = null;
   
   // Callback to send tracking data to the UI
   private onInferenceData: ((data: InferenceData[]) => void) | null = null;
@@ -123,8 +125,9 @@ class ReceiverClient {
 
       // 3. Spawn server (Optional: implement if needed)
       if(this.inferenceServer === null){
-        // const {pythonPath, scriptPath} = getPythonScript("inference.py")
-        // this.inferenceServer = spawn(pythonPath, [scriptPath])
+        const {pythonPath, scriptPath} = getPythonScript("inference.py")
+        this.inferenceOutputPath = getInferenceOutputPath();
+        this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath])
       }
 
     } catch (e) {
@@ -242,17 +245,23 @@ class ReceiverClient {
   }
 }
 
+function getBaseResourcesPath(): string {
+  return app.isPackaged
+    ? process.resourcesPath
+    : path.join(process.cwd(), 'resources');
+}
+
+function getInferenceOutputPath(): string {
+  const shortId = randomUUID().replace(/-/g, "").slice(0, 12);
+  return path.join(getBaseResourcesPath(), "captures", shortId);
+}
+
 // --- FIXED FUNCTION ---
 export function getPythonScript(scriptName: string): {pythonPath: string, scriptPath: string} {
   const isWin = process.platform === 'win32';
   const binaryName = isWin ? 'python.exe' : 'bin/python3';
 
-  // FIX: Use process.cwd() in dev (Project Root) or resourcesPath in prod
-  // This avoids the need for __dirname or __filename completely.
-  const baseResources = app.isPackaged
-    ? process.resourcesPath
-    : path.join(process.cwd(), 'resources'); 
-
+  const baseResources = getBaseResourcesPath();
   const pythonPath = app.isPackaged
     ? path.join(baseResources, 'python', binaryName)
     : path.join(baseResources, 'python/', (isWin? 'win': 'linux'), binaryName);
