@@ -186,7 +186,7 @@ const detectedRdInitializedAtom = atom(false)
 export function setDetectionImageFrame(buffer: Buffer){
   if(buffer) {
     const previousURL = store.get(imgUrlAtom);
-    if (previousURL === ''){
+    if (previousURL !== ''){
       URL.revokeObjectURL(previousURL)
     }
     

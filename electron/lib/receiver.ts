@@ -132,7 +132,17 @@ class ReceiverClient {
       if(this.inferenceServer === null){
         const {pythonPath, scriptPath} = getPythonScript("inference.py")
         this.inferenceOutputPath = getInferenceOutputPath();
-        this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath])
+        this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath], {
+          stdio: ['ignore', 'ignore', 'ignore']
+        })
+        this.inferenceServer.on('exit', (code, signal) => {
+          console.warn(`[INFERENCE] Exited code=${code} signal=${signal}`);
+          this.inferenceServer = null;
+        })
+        this.inferenceServer.on('error', (err) => {
+          console.error("[INFERENCE] Spawn error:", err);
+          this.inferenceServer = null;
+        })
       }
 
     } catch (e) {
