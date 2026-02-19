@@ -226,6 +226,10 @@ export function initDetectedRdListener() {
   });
 }
 
+export function clearDetectedRD() {
+  store.set(detected_RD_Atom, []);
+}
+
 export const recentSessionsLoadable = loadable(recentSessionsAtom);
 export const selectedSessionLoadable = loadable(selectedSession);
 

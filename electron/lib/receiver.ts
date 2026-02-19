@@ -62,7 +62,7 @@ class ReceiverClient {
     this.client = new net.Socket();
     this.client.on('data', (data) => this.processTCPResponse(data))
   }
-  
+
   public setInferenceCallback(cb: (data: InferenceData[]) => void) {
     this.onInferenceData = cb;
   }
@@ -93,22 +93,55 @@ class ReceiverClient {
     })
   }
 
-  connectClient(rasp_ip: string, rasp_port: number): Promise<void>{
+  connectClient(rasp_ip: string, rasp_port: number): Promise<boolean>{
     this.rasp_port = rasp_port;
     this.rasp_ip = rasp_ip;
     return new Promise((resolve, reject) => {
-      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve()) 
+      this.client.connect(this.rasp_port, this.rasp_ip, () => resolve(true)) 
       this.client.once('error', reject)
     })
   }
 
-  sendStartRequest(previewCallback: (buffer: Buffer) => void){
+  async disconnectClient(): Promise<void> {
+    try {
+      if (this.client && !this.client.destroyed) {
+        await this.sendStopRequest();
+      }
+    } catch {
+      // best-effort stop
+    }
+
+    if (this.udpListener){
+      this.udpListener.close();
+      this.udpListener = null;
+    }
+    if (this.udpInferenceSender) {
+      this.udpInferenceSender.close();
+      this.udpInferenceSender = null;
+    }
+
+    this.pendingRequests.forEach((req) => clearTimeout(req.timer));
+    this.pendingRequests = [];
+    this.receivedBuffer = Buffer.alloc(0);
+
+    if (this.client && !this.client.destroyed) {
+      this.client.end();
+      this.client.destroy();
+    }
+  }
+
+  async sendStartRequest(previewCallback: (buffer: Buffer) => void){
     if(this.udpListener){
       console.warn("Capture already started");
       return Promise.resolve(Response.SUCC_START)
     }
 
     try {
+      if (this.inferenceServer) {
+        this.inferenceServer.kill();
+        this.inferenceServer = null;
+      }
+
       // 1. Create listener for raspberry pi stream
       this.udpListener = dgram.createSocket('udp4');
       this.udpListener.bind(this.port);
@@ -133,7 +166,13 @@ class ReceiverClient {
         const {pythonPath, scriptPath} = getPythonScript("inference.py")
         this.inferenceOutputPath = getInferenceOutputPath();
         this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath], {
-          stdio: ['ignore', 'ignore', 'ignore']
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+        this.inferenceServer.stdout?.on('data', (chunk) => {
+          console.log(`[INFERENCE] ${chunk.toString().trim()}`);
+        })
+        this.inferenceServer.stderr?.on('data', (chunk) => {
+          console.error(`[INFERENCE] ${chunk.toString().trim()}`);
         })
         this.inferenceServer.on('exit', (code, signal) => {
           console.warn(`[INFERENCE] Exited code=${code} signal=${signal}`);
@@ -156,11 +195,22 @@ class ReceiverClient {
     };
     const payload = Buffer.from(JSON.stringify(config), 'utf-8');
 
+    const resetPacket = Buffer.from([0x02, 0x00, 0x00]);
+    this.udpInferenceSender?.send(resetPacket, 9123, "127.0.0.1");
+
     return this.sendCommand(Command.START_CAPTURE, payload)
   }
 
   async sendStopRequest(){
+    if (this.udpInferenceSender) {
+      const stopPacket = Buffer.from([0x02, 0x00, 0x00]);
+      this.udpInferenceSender.send(stopPacket, 9123, "127.0.0.1");
+    }
     const response = await this.sendCommand(Command.STOP_CAPTURE, Buffer.alloc(0))
+    if (this.inferenceServer) {
+      this.inferenceServer.kill();
+      this.inferenceServer = null;
+    }
     if (this.udpListener){
       this.udpListener.close();
       this.udpListener = null;

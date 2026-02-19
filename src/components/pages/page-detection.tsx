@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useAtom } from "jotai";
 import { CirclePlay, CircleStop, Loader2, Wifi, Activity, MapPin, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
-import { imgUrlAtom, setDetectionImageFrame, detected_RD_Atom } from "@/state";
+import { imgUrlAtom, setDetectionImageFrame, detected_RD_Atom, clearDetectedRD } from "@/state";
 
 enum Response {
   CONN_SUCCESS    = 0x10,
@@ -16,6 +16,7 @@ enum Response {
 
 function DetectionPage() {
   const [isDetecting, setIsDetecting] = useState(0) // 0: idle, 1: detecting, 2: loading
+  const [isConnected, setIsConnected] = useState(false)
   const [imgUrl, _] = useAtom(imgUrlAtom)
   const [detectedRD, __] = useAtom(detected_RD_Atom)
   useEffect(() => {
@@ -26,12 +27,30 @@ function DetectionPage() {
     }
   }, [])
 
-  const connect_client = () => {
-    // @ts-ignore
-    window.rasp_connection.connect_client("192.168.1.14", 12345)
+  const connect_client = async () => {
+    try {
+      // @ts-ignore
+      await window.rasp_connection.connect_client("192.168.1.14", 12345)
+      setIsConnected(true)
+    } catch (error) {
+      console.error("Failed to connect client", error)
+      setIsConnected(false)
+    }
+  }
+
+  const disconnect_client = async () => {
+    try {
+      // @ts-ignore
+      await window.rasp_connection.disconnect_client()
+      setIsConnected(false)
+      setIsDetecting(0)
+    } catch (error) {
+      console.error("Failed to disconnect client", error)
+    }
   }
 
   const toggle_detection = async () => {
+    if (!isConnected) return
     const is_detecting = (isDetecting === 0) ? false : (isDetecting === 1) ? true : null;
     setIsDetecting(2)
     
@@ -39,6 +58,9 @@ function DetectionPage() {
       if (is_detecting === true) {
         // @ts-ignore
         const response = await window.rasp_connection.send_stopreq()
+        if (response === Response.SUCC_STOP) {
+          clearDetectedRD()
+        }
         setIsDetecting((response === Response.SUCC_STOP) ? 0 : 1)
       } else if (is_detecting === false) {
         // @ts-ignore
@@ -80,9 +102,15 @@ function DetectionPage() {
               )}
             </Button>
             
-            <Button onClick={connect_client} variant="outline" className="w-full">
-              <Wifi className="mr-2 h-4 w-4"/> Connect
-            </Button>
+            {isConnected ? (
+              <Button onClick={disconnect_client} variant="outline" className="w-full">
+                <Wifi className="mr-2 h-4 w-4"/> Disconnect
+              </Button>
+            ) : (
+              <Button onClick={connect_client} variant="outline" className="w-full">
+                <Wifi className="mr-2 h-4 w-4"/> Connect
+              </Button>
+            )}
           </div>
         </div>
 

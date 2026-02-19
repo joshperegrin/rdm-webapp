@@ -9,7 +9,7 @@ import {
   archiveRoadDefect, 
   getAllSessions,
 } from './database/road.defect.model'
-import db from './database/db'
+// import db from './database/db'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -51,12 +51,17 @@ function createWindow() {
 
   // 1. Connection
   ipcMain.handle('rasp_connection:connect_client', (_, data) => receiver.connectClient(data.rasp_ip, data.rasp_port))
+  ipcMain.handle('rasp_connection:disconnect_client', async () => {
+    await receiver.disconnectClient();
+    return true;
+  })
   
   // 2. Start Capture
   // The callback passed here handles the image frame.
   // ReceiverClient decides whether to pass the Raw Frame (from Pi) or Annotated Frame (from Python)
   // based on the 'liveInferencePreview' toggle.
   ipcMain.handle('rasp_connection:send_startreq', () => {
+    sentInferenceIds.clear();
     return receiver.sendStartRequest((buffer)=> {
       const safeData = new Uint8Array(buffer);
       if(win && !win.isDestroyed()){
@@ -65,7 +70,11 @@ function createWindow() {
     })
   })
   // 3. Stop Capture
-  ipcMain.handle('rasp_connection:send_stopreq', async () => receiver.sendStopRequest())
+  ipcMain.handle('rasp_connection:send_stopreq', async () => {
+    const res = await receiver.sendStopRequest();
+    sentInferenceIds.clear();
+    return res;
+  })
 
   // 4. Toggle Preview Mode
   // Renderer calls this with true/false.

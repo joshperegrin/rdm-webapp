@@ -7,6 +7,7 @@ import os
 import sys
 from ai_edge_litert.interpreter import Interpreter
 from tracker.byte_tracker import BYTETracker
+from tracker.basetrack import BaseTrack
 
 # --- CONFIGURATION ---
 UDP_IP = "0.0.0.0"
@@ -52,6 +53,11 @@ os.makedirs(crops_dir, exist_ok=True)
 print(f"[INFO]: Saving detected frames to {frames_dir}")
 print(f"[INFO]: Saving detected crops to {crops_dir}")
 
+def reset_tracker():
+    global tracker
+    BaseTrack._count = 0
+    tracker = BYTETracker(tracker_args, frame_rate=30)
+
 # --- NETWORK SETUP ---
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:
@@ -84,6 +90,10 @@ try:
         try:
             while True:
                 data, addr = sock.recvfrom(BUFFER_SIZE)
+                if len(data) > 0 and (data[0] & 0x02) == 0x02:
+                    latest_data = data
+                    latest_addr = addr
+                    break
                 latest_data = data
                 latest_addr = addr
         except BlockingIOError:
@@ -98,8 +108,13 @@ try:
         if len(data) < 3: continue
 
         # --- 2. Parse Packet ---
-        # Byte 0 is the flag from Electron (1 = Need Preview, 0 = No Preview)
-        is_live_preview = data[0] == 1 
+        # Byte 0 is the flag from Electron (bit0 = preview, bit1 = stop/reset)
+        is_live_preview = (data[0] & 0x01) == 0x01
+        stop_requested = (data[0] & 0x02) == 0x02
+
+        if stop_requested:
+            reset_tracker()
+            continue
         
         # Byte 1-2 is JSON length of the original Pi packet
         json_len = struct.unpack("!H", data[1:3])[0]

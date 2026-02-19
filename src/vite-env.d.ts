@@ -17,6 +17,7 @@ export interface DatabaseAPI {
 
 export interface RaspConnectionAPI {
   connect_client: (rasp_ip: string, rasp_port: number) => Promise<void>;
+  disconnect_client: () => Promise<void>;
   send_startreq: () => Promise<void>;
   send_stopreq: () => Promise<void>;
   onPreviewFrame: (callback: (buffer: Uint8Array) => void) => void;
