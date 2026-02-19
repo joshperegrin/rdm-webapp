@@ -67,6 +67,11 @@ class ReceiverClient {
     this.onInferenceData = cb;
   }
 
+  // private onInferencePacket: ((data: { frame_path: string | null; detections: InferenceData[] }) => void) | null = null;
+  // public setInferencePacketCallback(cb: (data: { frame_path: string | null; detections: InferenceData[] }) => void) {
+    // this.onInferencePacket = cb;
+  // }
+
   private sendCommand(cmd: Command, payload: Buffer, timeoutMs: number = 2000): Promise<Response>{
     return new Promise((resolve) => {
       const header = Buffer.alloc(8);
@@ -225,11 +230,21 @@ class ReceiverClient {
   
         // 2. Parse JSON (Tracking Data)
         const jsonBuffer = msg.subarray(3, 3 + jsonLength);
-        const inferenceData: InferenceData[] = JSON.parse(jsonBuffer.toString('utf-8'));
+        const inferencePayload = JSON.parse(jsonBuffer.toString('utf-8')) as {
+          frame_path: string | null;
+          detections: InferenceData[];
+        };
   
         // Emit Inference Data to UI (Always happens)
         if (this.onInferenceData) {
-          this.onInferenceData(inferenceData);
+          this.onInferenceData(inferencePayload.detections || []);
+        }
+
+        if (this.onInferencePacket) {
+          this.onInferencePacket({
+            frame_path: inferencePayload.frame_path ?? null,
+            detections: inferencePayload.detections || [],
+          });
         }
   
         // 3. Parse Image (Only if Flag is 0x02 AND we are in live preview mode)

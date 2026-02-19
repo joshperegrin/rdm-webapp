@@ -209,12 +209,18 @@ try:
                 cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         # --- 7. Construct Response Packet ---
+        frame_path = None
         if len(tracked_objects) > 0:
             saved_frame_count += 1
             frame_path = os.path.join(frames_dir, f"frame-{saved_frame_count}.jpg")
             cv2.imwrite(frame_path, frame_for_saving)
 
-        json_str = json.dumps(tracked_objects)
+        payload_obj = {
+            "frame_path": frame_path,
+            "detections": tracked_objects
+        }
+
+        json_str = json.dumps(payload_obj)
         json_bytes = json_str.encode('utf-8')
         json_length = len(json_bytes)
         
