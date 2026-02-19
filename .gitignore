@@ -32,3 +32,4 @@ resources/python/linux
 resources/scripts/models
 resources/scripts/tracker/__pycache__
 resources/scripts/latest_inference.jpg
+resources/captures
