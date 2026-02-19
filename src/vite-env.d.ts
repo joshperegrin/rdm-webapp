@@ -20,6 +20,7 @@ export interface RaspConnectionAPI {
   send_startreq: () => Promise<void>;
   send_stopreq: () => Promise<void>;
   onPreviewFrame: (callback: (buffer: Uint8Array) => void) => void;
+  onInferenceData: (callback: (data: any) => void) => void;
 }
 
 declare global {

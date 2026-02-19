@@ -78,10 +78,14 @@ function createWindow() {
   // 5. Inference Data Listener
   // This listener is ALWAYS active once set. It sends JSON tracking data to the frontend
   // regardless of which video stream is being viewed.
+  const sentInferenceIds = new Set<number>();
   receiver.setInferenceCallback((data) => {
-    if(win && !win.isDestroyed()){
-      win.webContents.send('inference-data', data)
-    }
+    if (!win || win.isDestroyed()) return;
+    if (!Array.isArray(data) || data.length === 0) return;
+    const unique = data.filter((d: any) => d && typeof d.id === 'number' && !sentInferenceIds.has(d.id));
+    if (unique.length === 0) return;
+    unique.forEach((d: any) => sentInferenceIds.add(d.id));
+    win.webContents.send('inference-data', unique);
   })
   
   ipcMain.handle('db:get-sessions', async () => {

@@ -181,6 +181,7 @@ export const searchResultsLoadable = loadable(searchResultsAtom)
 export const store = createStore()
 
 export const imgUrlAtom = atom('')
+const detectedRdInitializedAtom = atom(false)
 
 export function setDetectionImageFrame(buffer: Buffer){
   if(buffer) {
@@ -194,5 +195,38 @@ export function setDetectionImageFrame(buffer: Buffer){
   }
 }
 
+export function initDetectedRdListener() {
+  if (store.get(detectedRdInitializedAtom)) return;
+  store.set(detectedRdInitializedAtom, true);
+
+  if (!window?.rasp_connection?.onInferenceData) return;
+
+  window.rasp_connection.onInferenceData((data: any[]) => {
+    if (!Array.isArray(data) || data.length === 0) return;
+    const now = new Date().toISOString();
+    const current = store.get(detected_RD_Atom);
+    const seenIds = new Set(current.map((rd) => rd.id));
+    const mapped = data
+      .filter((d) => d && d.id !== undefined && d.id !== null)
+      .filter((d) => !seenIds.has(String(d.id)))
+      .map((d) => createRD(
+        String(d.id ?? ""),
+        [0, 0],
+        now,
+        String(d.class ?? ""),
+        "",
+        JSON.stringify(d.box ?? []),
+        "",
+        false,
+        false
+      ));
+    if (mapped.length > 0) {
+      store.set(detected_RD_Atom, [...current, ...mapped]);
+    }
+  });
+}
+
 export const recentSessionsLoadable = loadable(recentSessionsAtom);
 export const selectedSessionLoadable = loadable(selectedSession);
+
+initDetectedRdListener();
