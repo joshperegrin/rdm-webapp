@@ -33,3 +33,5 @@ resources/scripts/models
 resources/scripts/tracker/__pycache__
 resources/scripts/latest_inference.jpg
 resources/captures
+electron/database/database.db-shm
+electron/database/database.db-wal

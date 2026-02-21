@@ -5,6 +5,7 @@ import path from 'node:path'
 import { ChildProcess, spawn } from "child_process"; 
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { saveSessionWithDetails, SessionSavePayload } from "../database/road.defect.model";
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -39,6 +40,20 @@ export interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+interface GpsPacket {
+  lat: number;
+  lng: number;
+  timestamp: string;
+}
+
+interface RoadDefectAggregate {
+  sumLat: number;
+  sumLng: number;
+  count: number;
+  classification: string | null;
+  thumbnail_path: string;
+}
+
 class ReceiverClient {
   rasp_ip: string = "192.168.1.14";
   rasp_port: number = 12345;
@@ -54,6 +69,13 @@ class ReceiverClient {
   private udpInferenceSender: dgram.Socket | null = null;
   private inferenceServer: ChildProcess | null = null;
   private inferenceOutputPath: string | null = null;
+  private sessionActive: boolean = false;
+  private sessionStart: GpsPacket | null = null;
+  private sessionEnd: GpsPacket | null = null;
+  private pendingFrameMeta: GpsPacket[] = [];
+  private images: SessionSavePayload["images"] = [];
+  private detections: SessionSavePayload["detections"] = [];
+  private roadDefects = new Map<string, RoadDefectAggregate>();
   
   // Callback to send tracking data to the UI
   private onInferenceData: ((data: InferenceData[]) => void) | null = null;
@@ -165,6 +187,7 @@ class ReceiverClient {
       if(this.inferenceServer === null){
         const {pythonPath, scriptPath} = getPythonScript("inference.py")
         this.inferenceOutputPath = getInferenceOutputPath();
+        this.resetSessionState();
         this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath], {
           stdio: ['ignore', 'pipe', 'pipe']
         })
@@ -211,6 +234,7 @@ class ReceiverClient {
       this.inferenceServer.kill();
       this.inferenceServer = null;
     }
+    await this.saveCurrentSession();
     if (this.udpListener){
       this.udpListener.close();
       this.udpListener = null;
@@ -254,6 +278,17 @@ class ReceiverClient {
       const jsonLength = msg.readUInt16BE(0);
       if (msg.length < 2 + jsonLength) return;
 
+      const jsonBuffer = msg.subarray(2, 2 + jsonLength);
+      const gps = this.parseGpsPacket(jsonBuffer);
+      if (gps) {
+        if (!this.sessionStart) {
+          this.sessionStart = gps;
+          this.sessionActive = true;
+        }
+        this.sessionEnd = gps;
+        this.pendingFrameMeta.push(gps);
+      }
+
       const imageBuffer = msg.subarray(2 + jsonLength);
       if (imageBuffer.length === 0) return;
 
@@ -294,18 +329,19 @@ class ReceiverClient {
           frame_path: string | null;
           detections: InferenceData[];
         };
+
+        const frameMeta = this.pendingFrameMeta.shift() ?? this.sessionEnd ?? {
+          lat: 0,
+          lng: 0,
+          timestamp: new Date().toISOString(),
+        };
   
         // Emit Inference Data to UI (Always happens)
         if (this.onInferenceData) {
           this.onInferenceData(inferencePayload.detections || []);
         }
 
-        if (this.onInferencePacket) {
-          this.onInferencePacket({
-            frame_path: inferencePayload.frame_path ?? null,
-            detections: inferencePayload.detections || [],
-          });
-        }
+        this.captureInferenceForSession(inferencePayload, frameMeta);
   
         // 3. Parse Image (Only if Flag is 0x02 AND we are in live preview mode)
         if (flag === 0x02 && this.liveInferencePreview) {
@@ -317,6 +353,134 @@ class ReceiverClient {
       } catch (e) {
         console.error("Error parsing inference response:", e);
       }
+  }
+
+  private resetSessionState() {
+    this.sessionActive = false;
+    this.sessionStart = null;
+    this.sessionEnd = null;
+    this.pendingFrameMeta = [];
+    this.images = [];
+    this.detections = [];
+    this.roadDefects.clear();
+  }
+
+  private parseGpsPacket(jsonBuffer: Buffer): GpsPacket | null {
+    try {
+      const data = JSON.parse(jsonBuffer.toString("utf-8")) as {
+        lat?: number;
+        long?: number;
+      };
+      if (typeof data?.lat !== "number" || typeof data?.long !== "number") return null;
+      return {
+        lat: data.lat,
+        lng: data.long,
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private captureInferenceForSession(
+    payload: { frame_path: string | null; detections: InferenceData[] },
+    meta: GpsPacket,
+  ) {
+    if (!this.sessionActive) return;
+
+    const detections = Array.isArray(payload.detections) ? payload.detections : [];
+    const framePath = payload.frame_path ?? null;
+    if (!framePath || detections.length === 0) return;
+
+    const imageKey = randomUUID();
+    this.images.push({
+      key: imageKey,
+      lat: meta.lat,
+      lng: meta.lng,
+      timestamp: meta.timestamp,
+      img_path: framePath,
+    });
+
+    detections.forEach((d) => {
+      const roadKey = String(d.id ?? "");
+      if (!roadKey) return;
+
+      const existing = this.roadDefects.get(roadKey);
+      if (existing) {
+        existing.sumLat += meta.lat;
+        existing.sumLng += meta.lng;
+        existing.count += 1;
+        if (!existing.classification && d.class !== undefined) {
+          existing.classification = String(d.class);
+        }
+      } else {
+        const thumbnailBase = this.inferenceOutputPath ?? "";
+        const thumbnailPath = path.join(thumbnailBase, "crops", `${roadKey}.jpg`);
+        this.roadDefects.set(roadKey, {
+          sumLat: meta.lat,
+          sumLng: meta.lng,
+          count: 1,
+          classification: d.class !== undefined ? String(d.class) : null,
+          thumbnail_path: thumbnailPath,
+        });
+      }
+
+      this.detections.push({
+        image_key: imageKey,
+        road_defect_key: roadKey,
+        bbox: JSON.stringify(d.box ?? []),
+        classification: d.class !== undefined ? String(d.class) : null,
+        calc_lat: meta.lat,
+        calc_lng: meta.lng,
+      });
+    });
+  }
+
+  private async saveCurrentSession() {
+    if (!this.sessionActive) return;
+
+    const start = this.sessionStart ?? {
+      lat: 0,
+      lng: 0,
+      timestamp: new Date().toISOString(),
+    };
+    const end = this.sessionEnd ?? start;
+
+    const road_defects: SessionSavePayload["road_defects"] = [];
+    for (const [key, value] of this.roadDefects.entries()) {
+      const count = value.count || 1;
+      road_defects.push({
+        key,
+        ave_lat: value.sumLat / count,
+        ave_lng: value.sumLng / count,
+        ave_classification: value.classification ?? null,
+        city: null,
+        thumbnail_path: value.thumbnail_path,
+        is_fixed: 0,
+        is_archived: 0,
+      });
+    }
+
+    const payload: SessionSavePayload = {
+      session: {
+        timestamp: start.timestamp,
+        start_lat: start.lat,
+        start_lng: start.lng,
+        end_lat: end.lat,
+        end_lng: end.lng,
+      },
+      images: this.images,
+      road_defects,
+      detections: this.detections,
+    };
+
+    try {
+      await saveSessionWithDetails(payload);
+    } catch (err) {
+      console.error("[SESSION SAVE] Failed:", err);
+    } finally {
+      this.resetSessionState();
+    }
   }
 }
 
