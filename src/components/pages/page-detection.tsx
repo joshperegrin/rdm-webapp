@@ -1,10 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { useAtom } from "jotai";
-import { CirclePlay, CircleStop, Loader2, Wifi, Activity, MapPin, Clock } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CirclePlay, CircleStop, Loader2, Wifi, Activity, MapPin, Clock, Map, Video } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { imgUrlAtom, setDetectionImageFrame, detected_RD_Atom, clearDetectedRD } from "@/state";
+import * as L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import * as protomapsL from "protomaps-leaflet";
+import { Compression, type DecompressFunc, PMTiles } from "pmtiles";
+import { ZstdCodec } from "zstd-codec";
 
-enum Response {
+enum RaspResponse {
   CONN_SUCCESS    = 0x10,
   CONN_FAIL       = 0x11,
   SUCC_START      = 0x12,
@@ -14,11 +19,61 @@ enum Response {
   TIMEOUT         = 0x99,
 }
 
+let zstdSimplePromise: Promise<{ decompress: (data: Uint8Array) => Uint8Array }> | null = null;
+
+const getZstdSimple = () => {
+  if (!zstdSimplePromise) {
+    zstdSimplePromise = new Promise((resolve, reject) => {
+      try {
+        ZstdCodec.run((zstd) => {
+          resolve(new zstd.Simple());
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  return zstdSimplePromise;
+};
+
+const decompressPMTiles: DecompressFunc = async (buf, compression) => {
+  if (compression === Compression.None || compression === Compression.Unknown) {
+    return buf;
+  }
+
+  if (compression === Compression.Gzip || compression === Compression.Brotli) {
+    if (typeof globalThis.DecompressionStream === "undefined") {
+      throw new Error("DecompressionStream is not available in this runtime.");
+    }
+    const format = compression === Compression.Gzip ? "gzip" : "br";
+    const stream = new Response(buf).body;
+    if (!stream) {
+      throw new Error("Failed to read compressed tile stream.");
+    }
+    const result = stream.pipeThrough(new globalThis.DecompressionStream(format));
+    return new Response(result).arrayBuffer();
+  }
+
+  if (compression === Compression.Zstd) {
+    const simple = await getZstdSimple();
+    const output = simple.decompress(new Uint8Array(buf));
+    return output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength);
+  }
+
+  throw new Error(`Unsupported PMTiles compression: ${compression}`);
+};
+
 function DetectionPage() {
   const [isDetecting, setIsDetecting] = useState(0) // 0: idle, 1: detecting, 2: loading
   const [isConnected, setIsConnected] = useState(false)
+  const [viewMode, setViewMode] = useState<"video" | "map">("video")
   const [imgUrl, _] = useAtom(imgUrlAtom)
   const [detectedRD, __] = useAtom(detected_RD_Atom)
+  const mapRef = useRef<L.Map | null>(null)
+  const rdLayerRef = useRef<L.LayerGroup | null>(null)
+  const pmtilesRef = useRef<PMTiles | null>(null)
+  const PMTILES_URL = "pmtiles://philippines.pmtiles";
+
   useEffect(() => {
     if (window.rasp_connection) {
        window.rasp_connection.onPreviewFrame((buffer: Uint8Array) => {
@@ -58,20 +113,85 @@ function DetectionPage() {
       if (is_detecting === true) {
         // @ts-ignore
         const response = await window.rasp_connection.send_stopreq()
-        if (response === Response.SUCC_STOP) {
+        if (response === RaspResponse.SUCC_STOP) {
           clearDetectedRD()
         }
-        setIsDetecting((response === Response.SUCC_STOP) ? 0 : 1)
+        setIsDetecting((response === RaspResponse.SUCC_STOP) ? 0 : 1)
       } else if (is_detecting === false) {
         // @ts-ignore
         const response = await window.rasp_connection.send_startreq()
-        setIsDetecting((response === Response.SUCC_START) ? 1 : 0)
+        setIsDetecting((response === RaspResponse.SUCC_START) ? 1 : 0)
       }
     } catch (error) {
       console.error("Failed to toggle detection", error)
       setIsDetecting(is_detecting ? 1 : 0) // Revert state on error
     }
   }
+
+  useEffect(() => {
+    if (viewMode !== "map") return;
+    if (mapRef.current) {
+      setTimeout(() => mapRef.current?.invalidateSize(), 0);
+      return;
+    }
+
+    mapRef.current = L.map("detection-map").setView([12.8797, 121.7740], 6);
+    if (!pmtilesRef.current) {
+      pmtilesRef.current = new PMTiles(PMTILES_URL, undefined, decompressPMTiles);
+    }
+
+    protomapsL
+      .leafletLayer({
+        url: pmtilesRef.current,
+        flavor: "light",
+        lang: "en",
+      })
+      .addTo(mapRef.current);
+
+    rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+      rdLayerRef.current = null;
+    };
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (!mapRef.current || !rdLayerRef.current) return;
+
+    rdLayerRef.current.clearLayers();
+
+    const bounds = L.latLngBounds([]);
+    detectedRD.forEach((rd: any) => {
+      if (!rd?.location) return;
+      const [lat, lng] = rd.location;
+      if (lat === 0 || lng === 0 || Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+      const marker = L.marker([lat, lng], {
+        icon: L.icon({
+          iconUrl:
+            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
+          shadowUrl:
+            "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+          iconSize: [25, 41],
+          iconAnchor: [12, 41],
+          popupAnchor: [1, -34],
+          shadowSize: [41, 41],
+        }),
+      }).bindPopup(`
+        <b>Classification:</b> ${rd.classification || "Unknown"}<br/>
+        <b>Timestamp:</b> ${rd.timestamp || "N/A"}
+      `);
+
+      rdLayerRef.current?.addLayer(marker);
+      bounds.extend([lat, lng]);
+    });
+
+    if (bounds.isValid()) {
+      mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [detectedRD, viewMode]);
 
   return (
     <div className="flex flex-row h-full w-full bg-slate-50 dark:bg-slate-900 p-4 gap-4 overflow-hidden">
@@ -85,6 +205,18 @@ function DetectionPage() {
             <Activity className="w-5 h-5 text-blue-500"/>
             Detection Control
           </h2>
+
+          <Button
+            onClick={() => setViewMode(viewMode === "video" ? "map" : "video")}
+            variant="outline"
+            className="w-full"
+          >
+            {viewMode === "video" ? (
+              <><Map className="mr-2 h-4 w-4"/> Map View</>
+            ) : (
+              <><Video className="mr-2 h-4 w-4"/> Video View</>
+            )}
+          </Button>
           
           <div className="grid grid-cols-2 gap-2">
             <Button 
@@ -163,13 +295,33 @@ function DetectionPage() {
 
       {/* Right Panel: Preview */}
       <div className="flex-1 bg-black rounded-xl shadow-inner overflow-hidden flex items-center justify-center relative">
-        {imgUrl ? (
-          <img src={imgUrl} className="w-full h-full object-contain" alt="Live Stream" />
-        ) : (
-          <div className="text-white/30 flex flex-col items-center">
-            <Wifi className="w-16 h-16 mb-4 opacity-20"/>
-            <p>Waiting for video stream...</p>
-          </div>
+        {viewMode === "video" && (
+          <>
+            {imgUrl ? (
+              <img src={imgUrl} className="w-full h-full object-contain" alt="Live Stream" />
+            ) : (
+              <div className="text-white/30 flex flex-col items-center">
+                <Wifi className="w-16 h-16 mb-4 opacity-20"/>
+                <p>Waiting for video stream...</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {viewMode === "map" && (
+          <>
+            <div id="detection-map" className="h-full w-full z-0" />
+            <div className="absolute bottom-4 right-4 z-20 w-64 h-36 bg-black/80 border border-white/10 rounded-lg overflow-hidden shadow-lg">
+              {imgUrl ? (
+                <img src={imgUrl} className="w-full h-full object-contain" alt="Live Stream" />
+              ) : (
+                <div className="text-white/30 flex flex-col items-center justify-center h-full text-xs">
+                  <Wifi className="w-6 h-6 mb-2 opacity-30"/>
+                  <p>No video</p>
+                </div>
+              )}
+            </div>
+          </>
         )}
         
         {/* Overlay Badge */}
