@@ -1,7 +1,9 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
+import { Readable } from 'node:stream'
 import ReceiverClient from './lib/receiver'
 import { 
   getRoadDefectsBySession, 
@@ -13,6 +15,19 @@ import {
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'pmtiles',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+])
 
 // The built directory structure
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -27,6 +42,74 @@ let win: BrowserWindow | null
 
 // Initialize receiver here to maintain state
 const receiver = new ReceiverClient()
+
+function getMaptilesRoot() {
+  return VITE_DEV_SERVER_URL
+    ? path.join(process.env.APP_ROOT, 'resources', 'maptiles')
+    : path.join(process.resourcesPath, 'maptiles')
+}
+
+function resolvePmtilesPath(requestUrl: URL) {
+  let hostAndPath = decodeURIComponent(`${requestUrl.hostname}${requestUrl.pathname}`)
+  hostAndPath = hostAndPath.replace(/\/+$/, '')
+  const safePath = path.normalize(hostAndPath).replace(/^(\.\.(\/|\\|$))+/, '')
+  return path.join(getMaptilesRoot(), safePath)
+}
+
+function parseRangeHeader(rangeHeader: string | null, size: number) {
+  if (!rangeHeader) return null
+  const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader)
+  if (!match) return null
+
+  const start = match[1] ? Number(match[1]) : 0
+  const end = match[2] ? Number(match[2]) : size - 1
+
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end) return null
+  const clampedEnd = Math.min(end, size - 1)
+  if (start > clampedEnd) return null
+  return { start, end: clampedEnd }
+}
+
+function registerPmtilesProtocol() {
+  protocol.handle('pmtiles', async (request) => {
+    const requestUrl = new URL(request.url)
+    const filePath = resolvePmtilesPath(requestUrl)
+
+    if (!filePath.endsWith('.pmtiles')) {
+      return new Response('Unsupported file type', { status: 400 })
+    }
+
+    try {
+      const stat = fs.statSync(filePath)
+      const range = parseRangeHeader(request.headers.get('range'), stat.size)
+      const headers = new Headers({
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'application/vnd.pmtiles',
+      })
+
+      if (range) {
+        const { start, end } = range
+        const stream = fs.createReadStream(filePath, { start, end })
+        headers.set('Content-Range', `bytes ${start}-${end}/${stat.size}`)
+        headers.set('Content-Length', String(end - start + 1))
+        return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
+          status: 206,
+          headers,
+        })
+      }
+
+      const stream = fs.createReadStream(filePath)
+      headers.set('Content-Length', String(stat.size))
+      return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
+        status: 200,
+        headers,
+      })
+    } catch (error) {
+      console.error('[pmtiles] Failed to load', filePath, error)
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -127,4 +210,7 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  registerPmtilesProtocol()
+  createWindow()
+})

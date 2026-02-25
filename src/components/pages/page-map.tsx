@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useAtom } from "jotai";
+import * as protomapsL from "protomaps-leaflet";
+import { Compression, type DecompressFunc, PMTiles } from "pmtiles";
+import { ZstdCodec } from "zstd-codec";
 
 import {
   recentSessionsLoadable, // loadable version
@@ -11,6 +14,50 @@ import {
   defectsRefreshAtom,
   Session,
 } from "@/state";
+
+let zstdSimplePromise: Promise<{ decompress: (data: Uint8Array) => Uint8Array }> | null = null;
+
+const getZstdSimple = () => {
+  if (!zstdSimplePromise) {
+    zstdSimplePromise = new Promise((resolve, reject) => {
+      try {
+        ZstdCodec.run((zstd) => {
+          resolve(new zstd.Simple());
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  return zstdSimplePromise;
+};
+
+const decompressPMTiles: DecompressFunc = async (buf, compression) => {
+  if (compression === Compression.None || compression === Compression.Unknown) {
+    return buf;
+  }
+
+  if (compression === Compression.Gzip || compression === Compression.Brotli) {
+    if (typeof globalThis.DecompressionStream === "undefined") {
+      throw new Error("DecompressionStream is not available in this runtime.");
+    }
+    const format = compression === Compression.Gzip ? "gzip" : "br";
+    const stream = new Response(buf).body;
+    if (!stream) {
+      throw new Error("Failed to read compressed tile stream.");
+    }
+    const result = stream.pipeThrough(new globalThis.DecompressionStream(format));
+    return new Response(result).arrayBuffer();
+  }
+
+  if (compression === Compression.Zstd) {
+    const simple = await getZstdSimple();
+    const output = simple.decompress(new Uint8Array(buf));
+    return output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength);
+  }
+
+  throw new Error(`Unsupported PMTiles compression: ${compression}`);
+};
 
 function MapPage() {
   //Use the loadable atoms instead of the raw async atoms
@@ -25,11 +72,13 @@ function MapPage() {
   const mapRef = useRef<L.Map | null>(null);
   const rdLayerRef = useRef<L.LayerGroup | null>(null);
   const rdMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const pmtilesRef = useRef<PMTiles | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "archive">("active");
   const [, triggerRefresh] = useAtom(defectsRefreshAtom);
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null);
   const defectRefs = useRef<Map<string, HTMLLIElement>>(new Map());
 
+  const PMTILES_URL = "pmtiles://philippines.pmtiles";
 
 /* Inside MapPage component */
 
@@ -100,9 +149,17 @@ const archiveRoadDefect = async (rdId: string | number) => {
 
     mapRef.current = L.map("map").setView([12.8797, 121.7740], 6);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(mapRef.current);
+    if (!pmtilesRef.current) {
+      pmtilesRef.current = new PMTiles(PMTILES_URL, undefined, decompressPMTiles);
+    }
+
+    protomapsL
+      .leafletLayer({
+        url: pmtilesRef.current,
+        flavor: "light",
+        lang: "en",
+      })
+      .addTo(mapRef.current);
 
     rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
 

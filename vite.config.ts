@@ -47,6 +47,15 @@ function copyDbFiles() {
 copyDbFiles();
 
 export default defineConfig({
+  server: {
+    watch: {
+      ignored: [
+        '**/resources/maptiles/**',
+        '**/resources/captures/**',
+        '**/resources/python/**',
+      ]
+    }
+  },
   plugins: [
     svgr(),
     tailwindcss(),

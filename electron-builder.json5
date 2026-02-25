@@ -17,6 +17,11 @@
       "from": "resources/scripts",
       "to": "app_scripts",
       "filter": ["**/*"]
+    },
+    {
+      "from": "resources/maptiles",
+      "to": "maptiles",
+      "filter": ["**/*"]
     }
   ],
   "files": [
