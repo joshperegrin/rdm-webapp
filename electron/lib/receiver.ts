@@ -16,6 +16,11 @@ export interface InferenceData {
   box: [number, number, number, number]; // x1, y1, x2, y2
 }
 
+export interface InferenceDataWithMeta extends InferenceData {
+  lat: number;
+  lng: number;
+  timestamp: string;
+}
 // REMOVED: const __filename / __dirname polyfills (They cause conflicts)
 
 export enum Command {
@@ -78,14 +83,14 @@ class ReceiverClient {
   private roadDefects = new Map<string, RoadDefectAggregate>();
   
   // Callback to send tracking data to the UI
-  private onInferenceData: ((data: InferenceData[]) => void) | null = null;
+  private onInferenceData: ((data: InferenceDataWithMeta[]) => void) | null = null;
 
   constructor(){
     this.client = new net.Socket();
     this.client.on('data', (data) => this.processTCPResponse(data))
   }
 
-  public setInferenceCallback(cb: (data: InferenceData[]) => void) {
+  public setInferenceCallback(cb: (data: InferenceDataWithMeta[]) => void) {
     this.onInferenceData = cb;
   }
 
@@ -338,7 +343,16 @@ class ReceiverClient {
   
         // Emit Inference Data to UI (Always happens)
         if (this.onInferenceData) {
-          this.onInferenceData(inferencePayload.detections || []);
+          const detections = Array.isArray(inferencePayload.detections)
+            ? inferencePayload.detections
+            : [];
+          const detectionsWithMeta = detections.map((d) => ({
+            ...d,
+            lat: frameMeta.lat,
+            lng: frameMeta.lng,
+            timestamp: frameMeta.timestamp,
+          }));
+          this.onInferenceData(detectionsWithMeta);
         }
 
         this.captureInferenceForSession(inferencePayload, frameMeta);

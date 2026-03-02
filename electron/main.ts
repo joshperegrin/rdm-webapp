@@ -171,13 +171,35 @@ function createWindow() {
   // This listener is ALWAYS active once set. It sends JSON tracking data to the frontend
   // regardless of which video stream is being viewed.
   const sentInferenceIds = new Set<number>();
+  const sentInferenceWithoutLocation = new Set<number>();
   receiver.setInferenceCallback((data) => {
     if (!win || win.isDestroyed()) return;
     if (!Array.isArray(data) || data.length === 0) return;
-    const unique = data.filter((d: any) => d && typeof d.id === 'number' && !sentInferenceIds.has(d.id));
-    if (unique.length === 0) return;
-    unique.forEach((d: any) => sentInferenceIds.add(d.id));
-    win.webContents.send('inference-data', unique);
+    const toSend: any[] = [];
+    data.forEach((d: any) => {
+      if (!d || typeof d.id !== 'number') return;
+      const hasLocation =
+        Number.isFinite(d.lat) &&
+        Number.isFinite(d.lng) &&
+        !(d.lat === 0 && d.lng === 0);
+
+      if (!sentInferenceIds.has(d.id)) {
+        sentInferenceIds.add(d.id);
+        if (!hasLocation) {
+          sentInferenceWithoutLocation.add(d.id);
+        }
+        toSend.push(d);
+        return;
+      }
+
+      if (sentInferenceWithoutLocation.has(d.id) && hasLocation) {
+        sentInferenceWithoutLocation.delete(d.id);
+        toSend.push(d);
+      }
+    });
+    if (toSend.length > 0) {
+      win.webContents.send('inference-data', toSend);
+    }
   })
   
   ipcMain.handle('db:get-sessions', async () => {

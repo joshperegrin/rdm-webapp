@@ -199,29 +199,76 @@ export function initDetectedRdListener() {
   if (store.get(detectedRdInitializedAtom)) return;
   store.set(detectedRdInitializedAtom, true);
 
+  const sanitizeExisting = () => {
+    const current = store.get(detected_RD_Atom);
+    const sanitized = current.filter((rd) => {
+      if (!rd || !Array.isArray(rd.location) || rd.location.length < 2) return false;
+      return Number.isFinite(Number(rd.location[0])) && Number.isFinite(Number(rd.location[1]));
+    });
+    if (sanitized.length !== current.length) {
+      store.set(detected_RD_Atom, sanitized);
+    }
+  };
+
+  sanitizeExisting();
+
   if (!window?.rasp_connection?.onInferenceData) return;
 
   window.rasp_connection.onInferenceData((data: any[]) => {
     if (!Array.isArray(data) || data.length === 0) return;
-    const now = new Date().toISOString();
+    const badPayload = data.find(
+      (d) =>
+        !Number.isFinite(Number(d?.lat)) || !Number.isFinite(Number(d?.lng))
+    );
+    if (badPayload) {
+      console.warn("[RD] Bad inference payload (lat/lng):", badPayload);
+    }
     const current = store.get(detected_RD_Atom);
-    const seenIds = new Set(current.map((rd) => rd.id));
-    const mapped = data
+    const byId = new Map(current.map((rd) => [rd.id, rd]));
+    const next = [...current];
+    let changed = false;
+
+    data
       .filter((d) => d && d.id !== undefined && d.id !== null)
-      .filter((d) => !seenIds.has(String(d.id)))
-      .map((d) => createRD(
-        String(d.id ?? ""),
-        [0, 0],
-        now,
-        String(d.class ?? ""),
-        "",
-        JSON.stringify(d.box ?? []),
-        "",
-        false,
-        false
-      ));
-    if (mapped.length > 0) {
-      store.set(detected_RD_Atom, [...current, ...mapped]);
+      .forEach((d) => {
+        const id = String(d.id ?? "");
+        if (!id) return;
+        const location =
+          (Number.isFinite(d.lat) && Number.isFinite(d.lng))
+            ? [d.lat, d.lng] as [number, number]
+            : null;
+        const timestamp =
+          typeof d.timestamp === "string" ? d.timestamp : new Date().toISOString();
+
+        const existing = byId.get(id);
+        if (existing) {
+          if (location && existing.location[0] === 0 && existing.location[1] === 0) {
+            existing.location = location;
+            existing.timestamp = timestamp;
+            if (d.class !== undefined && d.class !== null) {
+              existing.classification = String(d.class);
+            }
+            changed = true;
+          }
+          return;
+        }
+
+        next.push(createRD(
+          id,
+          location ?? [0, 0],
+          timestamp,
+          String(d.class ?? ""),
+          "",
+          JSON.stringify(d.box ?? []),
+          "",
+          false,
+          false
+        ));
+        changed = true;
+      });
+
+    if (changed) {
+      store.set(detected_RD_Atom, next);
     }
   });
 }

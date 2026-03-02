@@ -135,20 +135,40 @@ function DetectionPage() {
       return;
     }
 
-    mapRef.current = L.map("detection-map").setView([12.8797, 121.7740], 6);
-    if (!pmtilesRef.current) {
-      pmtilesRef.current = new PMTiles(PMTILES_URL, undefined, decompressPMTiles);
-    }
+    const initMap = () => {
+      const container = document.getElementById("detection-map");
+      if (!container) {
+        console.warn("[RD] Map container not found");
+        return;
+      }
+      if (container.clientWidth === 0 || container.clientHeight === 0) {
+        console.warn("[RD] Map container has zero size, retrying");
+        setTimeout(initMap, 50);
+        return;
+      }
 
-    protomapsL
-      .leafletLayer({
-        url: pmtilesRef.current,
-        flavor: "light",
-        lang: "en",
-      })
-      .addTo(mapRef.current);
+      try {
+        mapRef.current = L.map(container).setView([12.8797, 121.7740], 6);
+        if (!pmtilesRef.current) {
+          pmtilesRef.current = new PMTiles(PMTILES_URL, undefined, decompressPMTiles);
+        }
 
-    rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
+        protomapsL
+          .leafletLayer({
+            url: pmtilesRef.current,
+            flavor: "light",
+            lang: "en",
+          })
+          .addTo(mapRef.current);
+
+        rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
+        setTimeout(() => mapRef.current?.invalidateSize(), 0);
+      } catch (err) {
+        console.error("[RD] Map init error", err);
+      }
+    };
+
+    initMap();
 
     return () => {
       mapRef.current?.remove();
@@ -162,13 +182,29 @@ function DetectionPage() {
 
     rdLayerRef.current.clearLayers();
 
+    const badRd = detectedRD.find(
+      (rd: any) =>
+        !rd?.location ||
+        !Number.isFinite(Number(rd.location[0])) ||
+        !Number.isFinite(Number(rd.location[1]))
+    );
+    if (badRd) {
+      console.warn("[RD] Bad detectedRD entry (location):", badRd);
+    }
+
     const bounds = L.latLngBounds([]);
     detectedRD.forEach((rd: any) => {
       if (!rd?.location) return;
       const [lat, lng] = rd.location;
-      if (lat === 0 || lng === 0 || Number.isNaN(lat) || Number.isNaN(lng)) return;
+      const latNum = Number(lat);
+      const lngNum = Number(lng);
+      const hasValidLocation =
+        Number.isFinite(latNum) &&
+        Number.isFinite(lngNum) &&
+        !(latNum === 0 && lngNum === 0);
+      if (!hasValidLocation) return;
 
-      const marker = L.marker([lat, lng], {
+      const marker = L.marker([latNum, lngNum], {
         icon: L.icon({
           iconUrl:
             "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
@@ -185,12 +221,12 @@ function DetectionPage() {
       `);
 
       rdLayerRef.current?.addLayer(marker);
-      bounds.extend([lat, lng]);
+      bounds.extend([latNum, lngNum]);
     });
 
-    if (bounds.isValid()) {
-      mapRef.current.fitBounds(bounds, { padding: [50, 50] });
-    }
+    // if (bounds.isValid()) {
+      // mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+    // }
   }, [detectedRD, viewMode]);
 
   return (
@@ -280,7 +316,13 @@ function DetectionPage() {
                 <div className="grid grid-cols-1 gap-1 text-slate-500 dark:text-slate-400 text-xs mt-2">
                   <div className="flex items-center gap-1.5">
                     <MapPin className="w-3 h-3"/>
-                    <span>{rd.location ? `[${rd.location[0].toFixed(5)}, ${rd.location[1].toFixed(5)}]` : 'N/A'}</span>
+                    <span>
+                      {rd.location &&
+                      Number.isFinite(Number(rd.location[0])) &&
+                      Number.isFinite(Number(rd.location[1]))
+                        ? `[${Number(rd.location[0]).toFixed(5)}, ${Number(rd.location[1]).toFixed(5)}]`
+                        : 'N/A'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Clock className="w-3 h-3"/>
