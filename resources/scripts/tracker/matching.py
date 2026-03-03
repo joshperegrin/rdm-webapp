@@ -4,9 +4,25 @@ import scipy
 import lap
 from scipy.spatial.distance import cdist
 
-from cython_bbox import bbox_overlaps as bbox_ious
 from . import kalman_filter
 import time
+
+def bbox_ious(atlbrs, btlbrs):
+    # Pure numpy IoU to replace cython_bbox dependency.
+    if atlbrs.size == 0 or btlbrs.size == 0:
+        return np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float64)
+    atlbrs = np.asarray(atlbrs, dtype=np.float64)
+    btlbrs = np.asarray(btlbrs, dtype=np.float64)
+
+    tl = np.maximum(atlbrs[:, None, :2], btlbrs[None, :, :2])
+    br = np.minimum(atlbrs[:, None, 2:], btlbrs[None, :, 2:])
+    wh = np.clip(br - tl, a_min=0.0, a_max=None)
+    inter = wh[..., 0] * wh[..., 1]
+
+    area_a = (atlbrs[:, 2] - atlbrs[:, 0]) * (atlbrs[:, 3] - atlbrs[:, 1])
+    area_b = (btlbrs[:, 2] - btlbrs[:, 0]) * (btlbrs[:, 3] - btlbrs[:, 1])
+    union = area_a[:, None] + area_b[None, :] - inter
+    return inter / np.clip(union, a_min=1e-12, a_max=None)
 
 def merge_matches(m1, m2, shape):
     O,P,Q = shape
