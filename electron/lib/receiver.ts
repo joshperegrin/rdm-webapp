@@ -191,7 +191,7 @@ class ReceiverClient {
 
       // 3. Spawn server (Optional: implement if needed)
       if(this.inferenceServer === null){
-        const {pythonPath, scriptPath} = getPythonScript("inference.py")
+        const {pythonPath, scriptPath} = getPythonScript("inference_rfdetr.py")
         this.inferenceOutputPath = getInferenceOutputPath();
         this.resetSessionState();
         this.inferenceServer = spawn(pythonPath, ['-u', scriptPath, this.inferenceOutputPath], {
