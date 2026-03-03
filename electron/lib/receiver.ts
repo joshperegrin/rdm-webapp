@@ -194,8 +194,12 @@ class ReceiverClient {
         const {pythonPath, scriptPath} = getPythonScript("inference.py")
         this.inferenceOutputPath = getInferenceOutputPath();
         this.resetSessionState();
-        this.inferenceServer = spawn(pythonPath, [scriptPath, this.inferenceOutputPath], {
-          stdio: ['ignore', 'pipe', 'pipe']
+        this.inferenceServer = spawn(pythonPath, ['-u', scriptPath, this.inferenceOutputPath], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PYTHONUNBUFFERED: '1',
+          },
         })
         this.inferenceServer.stdout?.on('data', (chunk) => {
           console.log(`[INFERENCE] ${chunk.toString().trim()}`);
