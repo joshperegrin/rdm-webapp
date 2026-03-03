@@ -85,7 +85,8 @@ function DetectionPage() {
   const connect_client = async () => {
     try {
       // @ts-ignore
-      await window.rasp_connection.connect_client("192.168.1.14", 12345)
+      // await window.rasp_connection.connect_client("192.168.1.14", 12345)
+      await window.rasp_connection.connect_client("10.42.0.1", 12345)
       setIsConnected(true)
     } catch (error) {
       console.error("Failed to connect client", error)

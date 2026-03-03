@@ -60,7 +60,8 @@ interface RoadDefectAggregate {
 }
 
 class ReceiverClient {
-  rasp_ip: string = "192.168.1.14";
+  // rasp_ip: string = "192.168.1.14";
+  rasp_ip: string = "10.42.0.1";
   rasp_port: number = 12345;
   
   // Toggle this to control if Python sends back an image
