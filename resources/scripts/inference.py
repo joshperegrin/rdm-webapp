@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import os
 import sys
+import time
 from ai_edge_litert.interpreter import Interpreter
 from tracker.byte_tracker import BYTETracker
 from tracker.basetrack import BaseTrack
@@ -45,6 +46,19 @@ class TrackerArgs:
 tracker_args = TrackerArgs()
 tracker = BYTETracker(tracker_args, frame_rate=30)
 saved_frame_count = 0
+frame_count = 0
+timing_accum = {
+    "recv": 0.0,
+    "parse": 0.0,
+    "pre": 0.0,
+    "infer": 0.0,
+    "post": 0.0,
+    "track": 0.0,
+    "encode": 0.0,
+    "send": 0.0,
+    "total": 0.0,
+}
+timing_report_every = 1
 output_base_dir = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUTPUT_DIR
 frames_dir = os.path.join(output_base_dir, "frames")
 crops_dir = os.path.join(output_base_dir, "crops")
@@ -83,6 +97,7 @@ except Exception as e:
 # --- MAIN LOOP ---
 try: 
     while True:
+        frame_start = time.perf_counter()
         # --- 1. Receive & Drain Buffer ---
         latest_data = None
         latest_addr = None
@@ -106,8 +121,10 @@ try:
             data, addr = latest_data, latest_addr
 
         if len(data) < 3: continue
+        timing_accum["recv"] += time.perf_counter() - frame_start
 
         # --- 2. Parse Packet ---
+        t0 = time.perf_counter()
         # Byte 0 is the flag from Electron (bit0 = preview, bit1 = stop/reset)
         is_live_preview = (data[0] & 0x01) == 0x01
         stop_requested = (data[0] & 0x02) == 0x02
@@ -127,8 +144,10 @@ try:
 
         if frame is None: continue
         frame_for_saving = frame.copy()
+        timing_accum["parse"] += time.perf_counter() - t0
 
         # --- 3. Pre-process for Model ---
+        t0 = time.perf_counter()
         orig_h, orig_w = frame.shape[:2]
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         input_data = cv2.resize(rgb_frame, (input_width, input_height))
@@ -136,8 +155,10 @@ try:
 
         if input_details[0]['dtype'] == np.float32:
             input_data = (np.float32(input_data) - 127.5) / 127.5
+        timing_accum["pre"] += time.perf_counter() - t0
 
         # --- 4. Run Inference ---
+        t0 = time.perf_counter()
         interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
         
@@ -145,7 +166,9 @@ try:
         classes = interpreter.get_tensor(output_details[1]['index'])[0] 
         scores = interpreter.get_tensor(output_details[2]['index'])[0] 
         count = int(interpreter.get_tensor(output_details[3]['index'])[0])
+        timing_accum["infer"] += time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         detections = []
         raw_detections = []
 
@@ -161,8 +184,10 @@ try:
 
         detections = np.array(detections)
         raw_detections = np.array(raw_detections)
+        timing_accum["post"] += time.perf_counter() - t0
 
         # --- 5. Update Tracker ---
+        t0 = time.perf_counter()
         online_targets = []
         if len(detections) > 0:
             online_targets = tracker.update(
@@ -170,8 +195,10 @@ try:
                 [orig_h, orig_w], 
                 [orig_h, orig_w] 
             )
+        timing_accum["track"] += time.perf_counter() - t0
         
         # --- 6. Prepare Payload Data ---
+        t0 = time.perf_counter()
         tracked_objects = []
 
         for t in online_targets:
@@ -222,8 +249,10 @@ try:
                 
                 label = f"ID: {t.track_id}"
                 cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        timing_accum["post"] += time.perf_counter() - t0
 
         # --- 7. Construct Response Packet ---
+        t0 = time.perf_counter()
         frame_path = None
         if len(tracked_objects) > 0:
             saved_frame_count += 1
@@ -253,10 +282,32 @@ try:
             # Protocol: [FLAG(1)] [JSON_LEN(2)] [JSON]
             header_pack = struct.pack("!BH", 0x01, json_length)
             payload = header_pack + json_bytes
+        timing_accum["encode"] += time.perf_counter() - t0
 
         # Send back to Electron
+        t0 = time.perf_counter()
         if payload and addr:
             sock.sendto(payload, addr)
+        timing_accum["send"] += time.perf_counter() - t0
+
+        timing_accum["total"] += time.perf_counter() - frame_start
+        frame_count += 1
+        if frame_count % timing_report_every == 0:
+            denom = float(timing_report_every)
+            print(
+                "[TIMING ms/frame] "
+                f"recv={timing_accum['recv']/denom*1000:.1f} "
+                f"parse={timing_accum['parse']/denom*1000:.1f} "
+                f"pre={timing_accum['pre']/denom*1000:.1f} "
+                f"infer={timing_accum['infer']/denom*1000:.1f} "
+                f"post={timing_accum['post']/denom*1000:.1f} "
+                f"track={timing_accum['track']/denom*1000:.1f} "
+                f"encode={timing_accum['encode']/denom*1000:.1f} "
+                f"send={timing_accum['send']/denom*1000:.1f} "
+                f"total={timing_accum['total']/denom*1000:.1f}"
+            )
+            for k in timing_accum:
+                timing_accum[k] = 0.0
 
 except KeyboardInterrupt:
     print("\n[STOPPING]: User Interrupted.")
