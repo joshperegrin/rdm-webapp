@@ -17,6 +17,7 @@ BUFFER_SIZE = 65535
 MODEL_PATH = "resources/scripts/models/rfdetr.onnx"
 DEFAULT_OUTPUT_DIR = "resources/scripts/captures/default"
 MODEL_INPUT_SIZE = 576
+DEBUG_DUMP_ONCE = True
 
 def get_iou(box1, box2):
     """ Calculates IoU between two bounding boxes (x1, y1, x2, y2). """
@@ -242,6 +243,14 @@ try:
         # --- 4. Run Inference ---
         t0 = time.perf_counter()
         outputs = session.run(output_names, {input_name: input_data})
+        if DEBUG_DUMP_ONCE:
+            print("[DEBUG]: RFDETR raw outputs (first dump only)")
+            for i, out in enumerate(outputs):
+                arr = np.asarray(out)
+                flat = arr.reshape(-1)
+                preview = flat[:20].tolist()
+                print(f"[DEBUG]: out[{i}] shape={arr.shape} dtype={arr.dtype} sample={preview}")
+            DEBUG_DUMP_ONCE = False
         timing_accum["infer"] += time.perf_counter() - t0
 
         t0 = time.perf_counter()
