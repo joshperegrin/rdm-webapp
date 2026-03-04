@@ -113,8 +113,8 @@ def parse_rfdetr_outputs(outputs, orig_w, orig_h, score_thresh=0.1):
 
     for out in outputs:
         arr = np.asarray(out)
-        if arr.ndim == 2 and arr.shape[1] == 4 and boxes is None:
-            boxes = arr
+        if arr.ndim in (2, 3) and arr.shape[-1] == 4 and boxes is None:
+            boxes = arr[0] if arr.ndim == 3 and arr.shape[0] == 1 else arr
         elif arr.ndim in (1, 2) and scores is None:
             flat = arr.reshape(-1)
             if flat.dtype.kind in ("f", "i") and flat.size > 0:
@@ -123,23 +123,32 @@ def parse_rfdetr_outputs(outputs, orig_w, orig_h, score_thresh=0.1):
             flat = arr.reshape(-1)
             if flat.dtype.kind in ("i", "u"):
                 labels = flat
+        elif arr.ndim in (2, 3) and arr.shape[-1] > 1 and labels is None:
+            labels = arr[0] if arr.ndim == 3 and arr.shape[0] == 1 else arr
 
     if boxes is None:
         return np.empty((0, 5)), np.empty((0, 6))
+
+    if labels is not None and labels.ndim == 2 and labels.shape[0] == boxes.shape[0]:
+        class_probs = labels.astype(np.float32)
+        scores = class_probs.max(axis=-1)
+        labels = class_probs.argmax(axis=-1)
 
     if scores is None:
         scores = np.ones((boxes.shape[0],), dtype=np.float32)
     if labels is None:
         labels = np.zeros((boxes.shape[0],), dtype=np.int64)
 
-    if boxes.max() <= 1.5:
-        boxes_xyxy = boxes.copy()
-        boxes_xyxy[:, 0] *= orig_w
-        boxes_xyxy[:, 2] *= orig_w
-        boxes_xyxy[:, 1] *= orig_h
-        boxes_xyxy[:, 3] *= orig_h
-    else:
-        boxes_xyxy = boxes
+    # RFDETR outputs cx,cy,w,h normalized.
+    cx = boxes[:, 0]
+    cy = boxes[:, 1]
+    w = boxes[:, 2]
+    h = boxes[:, 3]
+    x1 = (cx - w / 2.0) * orig_w
+    y1 = (cy - h / 2.0) * orig_h
+    x2 = (cx + w / 2.0) * orig_w
+    y2 = (cy + h / 2.0) * orig_h
+    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=-1)
 
     detections = []
     raw_detections = []
