@@ -73,6 +73,7 @@ def reset_tracker():
 
 # --- NETWORK SETUP ---
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(1.0)
 try:
     sock.bind((UDP_IP, UDP_PORT))
     print(f"[LISTENING]: Bound to {UDP_IP}:{UDP_PORT}")
@@ -171,9 +172,14 @@ try:
         except BlockingIOError:
             pass
         sock.setblocking(True)
+        sock.settimeout(1.0)
 
         if latest_data is None:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
+            try:
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+            except socket.timeout:
+                print("[INFO]: Waiting for UDP frames on 0.0.0.0:9123")
+                continue
         else:
             data, addr = latest_data, latest_addr
 

@@ -230,6 +230,7 @@ class ReceiverClient {
 
     const resetPacket = Buffer.from([0x02, 0x00, 0x00]);
     this.udpInferenceSender?.send(resetPacket, 9123, "127.0.0.1");
+    console.log(`[INFERECE] UDP reset sent to 127.0.0.1:9123 (${resetPacket.length} bytes)`);
 
     return this.sendCommand(Command.START_CAPTURE, payload)
   }
@@ -317,6 +318,7 @@ class ReceiverClient {
       // Send to Python Inference Server
       if(!this.liveInferencePreview) previewCallback(imageBuffer)
       this.udpInferenceSender?.send(newMsg, 9123, "127.0.0.1")
+      console.log(`[Inference] UDP frame sent to 127.0.0.1:9123`)
 
     } catch (err) {
       console.error("Error decoding UDP packet:", err);
