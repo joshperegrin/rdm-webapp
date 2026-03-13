@@ -3,16 +3,6 @@ import { loadable } from "jotai/utils";
 import { createStore } from 'jotai/vanilla'
 
 
-// atom for detect page detected potholes (array of potholes)
-// derived atom for total detected?
-// derived atom for latest image of detected pothole
-// 
-// there should be an electron callback event that sends the
-// new detected potholes to the renderer, this function will
-// update the detected potholes atom
-
-
-
 export interface RD{
   id: string;
   location: [number, number];
@@ -67,27 +57,20 @@ export const latestDetected_RD_Atom = atom(
     return list.length > 0 ? list[list.length - 1] : undefined;
   }
 )
+
+// Only incremented to force-refresh defects — does NOT affect sessions or selectedSession
 export const defectsRefreshAtom = atom(0);
 
-// Recent Sessions (paginated)
-// potholes for selected session
-// 
-// Filtered Potholes (paginated)
-// getter -> 
-// 
-// atom store to update the filtered session
-// 
-
-//Update Recent Sessions Atom to fetch from DB
 export const recentSessionsAtom = atom(async () => {
   try {
     if (!window.database) return [];
     
     const dbSessions = await window.database.getSessions();
+
+    console.log("RAW DB SESSIONS:", dbSessions);
     
-    // --- UPDATE THIS MAPPING ---
     return dbSessions.map((s: any) => ({
-      id: `session-${s.session_id}`,
+      id: `session-${s.session_id ?? s.id}`,
       timestamp: s.timestamp,
       start_location: [s.start_lat, s.start_lng],
       end_location: [s.end_lat, s.end_lng],
@@ -101,28 +84,33 @@ export const recentSessionsAtom = atom(async () => {
 
 export const selectedSessionID = atom("")
 
+// FIX: loadedSessionsAtom caches the sessions list as a plain sync atom.
+// selectedSession derives from this sync atom instead of the async recentSessionsAtom,
+// so it NEVER goes into loading state when defectsRefreshAtom increments.
+export const loadedSessionsAtom = atom<Session[]>([]);
+
 export const selectedSession = atom(
-  async (get) => {
-    const sessions = await get(recentSessionsAtom)
-    const id = get(selectedSessionID)
-    return sessions.find((s) => s.id === id) ?? null
+  (get) => {
+    const sessions = get(loadedSessionsAtom);
+    const id = get(selectedSessionID);
+    return sessions.find((s) => s.id === id) ?? null;
   }
 )
 
-//Update Selected Session Defects Atom
 export const selectedSession_RD_Atom = atom(async (get) => {
   get(defectsRefreshAtom);
   const idStr = get(selectedSessionID);
   
-  // para session-1 ganon itsura nya
   const numericId = parseInt(idStr.replace(/\D/g, ''), 10);
+
+  console.log("SELECTED SESSION ID STR:", idStr);
+  console.log("SELECTED SESSION NUMERIC:", numericId);
   
   if (isNaN(numericId) || idStr === "") return [];
 
   try {
     const dbResult = await window.database.getRoadDefectsBySession(numericId);
 
-    // Map DB result to your Interface
     return dbResult.map((row: any) => createRD(
       row.road_defects_id.toString(),
       [row.ave_lat, row.ave_lng],
@@ -132,7 +120,7 @@ export const selectedSession_RD_Atom = atom(async (get) => {
       "",
       row.thumbnail_path || "",
       row.is_fixed === 1,
-      row.is_archived === 1
+      row.is_archived === 1,
     ));
   } catch (error) {
     console.error("Error loading defects:", error);
@@ -166,9 +154,6 @@ export const searchResultsAtom = atom(
     }
     
     try{
-      // fetch stuff
-      
-      // test data
       return [
         createRD("", [0, 0], "", "", "", "", "", false, false),
         createRD("", [0, 0], "", "", "", "", "", false, false),
@@ -289,8 +274,8 @@ export const reportsAtom = atom(async (get) => {
     if (!window.database) return { sessions: [], allDefects: [] };
 
     const rawSessions = await window.database.getSessions();
-    const defectPromises = rawSessions.map((s: any) => 
-      window.database.getRoadDefectsBySession(s.session_id)
+    const defectPromises = rawSessions.map((s: any) =>
+      window.database.getRoadDefectsBySession(s.session_id ?? s.id)
     );
     
     const defectsArrays = await Promise.all(defectPromises);

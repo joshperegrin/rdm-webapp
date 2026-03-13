@@ -11,8 +11,9 @@ import fs from 'node:fs'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-//copy files
-function copyDbFiles() {
+// Copy only SQL schema/seed files to dist-electron (NOT the database itself)
+// database.db lives permanently in /resources and is never copied or wiped
+function copySqlFiles() {
   const srcDir = path.join(__dirname, 'electron/database');
   const destDir = path.join(__dirname, 'dist-electron');
 
@@ -20,18 +21,7 @@ function copyDbFiles() {
     fs.mkdirSync(destDir, { recursive: true });
   }
 
-  //clear old files on dist-electron
-  const oldFiles = fs.readdirSync(destDir).filter(f => f.startsWith('database.db'));
-  oldFiles.forEach(f => fs.unlinkSync(path.join(destDir, f)));
-
-  // copy all files needed
-  const files = [
-    'database.db', 
-    'database.db-wal', 
-    'database.db-shm', 
-    'schema.sql', 
-    'seed.sql'
-  ]; 
+  const files = ['schema.sql', 'seed.sql'];
 
   files.forEach(file => {
     const src = path.join(srcDir, file);
@@ -44,7 +34,7 @@ function copyDbFiles() {
   });
 }
 
-copyDbFiles();
+copySqlFiles();
 
 export default defineConfig({
   server: {

@@ -37,3 +37,4 @@ electron/database/database.db-shm
 electron/database/database.db-wal
 resources/maptiles/osm-2020-02-10-v3.11_asia_philippines.mbtiles
 resources/maptiles
+resources/database.db

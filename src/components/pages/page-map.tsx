@@ -5,13 +5,15 @@ import { useAtom } from "jotai";
 import * as protomapsL from "protomaps-leaflet";
 import { Compression, type DecompressFunc, PMTiles } from "pmtiles";
 import { ZstdCodec } from "zstd-codec";
+import { MapPin, Activity, Clock, Map as MapIcon, X, ZoomIn } from "lucide-react";
 
 import {
-  recentSessionsLoadable, // loadable version
+  recentSessionsLoadable,
   selectedSessionID,
-  selectedSessionLoadable, // loadable version
+  selectedSessionLoadable,
   selectedSession_RD_loadable,
   defectsRefreshAtom,
+  loadedSessionsAtom,
   Session,
 } from "@/state";
 
@@ -36,38 +38,55 @@ const decompressPMTiles: DecompressFunc = async (buf, compression) => {
   if (compression === Compression.None || compression === Compression.Unknown) {
     return buf;
   }
-
   if (compression === Compression.Gzip || compression === Compression.Brotli) {
     if (typeof globalThis.DecompressionStream === "undefined") {
       throw new Error("DecompressionStream is not available in this runtime.");
     }
     const format = compression === Compression.Gzip ? "gzip" : "br";
     const stream = new Response(buf).body;
-    if (!stream) {
-      throw new Error("Failed to read compressed tile stream.");
-    }
+    if (!stream) throw new Error("Failed to read compressed tile stream.");
     const result = stream.pipeThrough(new globalThis.DecompressionStream(format));
     return new Response(result).arrayBuffer();
   }
-
   if (compression === Compression.Zstd) {
     const simple = await getZstdSimple();
     const output = simple.decompress(new Uint8Array(buf));
     return output.buffer.slice(output.byteOffset, output.byteOffset + output.byteLength);
   }
-
   throw new Error(`Unsupported PMTiles compression: ${compression}`);
 };
 
+type RoadDefect = {
+  id: string | number;
+  classification?: string;
+  location: [number, number];
+  fixed: boolean;
+  archived: boolean;
+  mainImageUrl?: string;
+};
+
+const isValidCoord = (lat: any, lng: any): boolean =>
+  lat != null && lng != null &&
+  !Number.isNaN(lat) && !Number.isNaN(lng) &&
+  Number.isFinite(lat) && Number.isFinite(lng) &&
+  !(lat === 0 && lng === 0);
+
 function MapPage() {
-  //Use the loadable atoms instead of the raw async atoms
   const [sessionsValue] = useAtom(recentSessionsLoadable);
-  const [, setSelectedSessionID] = useAtom(selectedSessionID);
+  const [currentSessionID, setSelectedSessionID] = useAtom(selectedSessionID);
+  const [, setLoadedSessions] = useAtom(loadedSessionsAtom);
   const [sessionValue] = useAtom(selectedSessionLoadable);
   const [rdLoadable] = useAtom(selectedSession_RD_loadable);
 
-  const sessions = sessionsValue.state === 'hasData' ? sessionsValue.data : [];
-  const session = sessionValue.state === 'hasData' ? sessionValue.data : null;
+  const sessions = sessionsValue.state === "hasData" ? sessionsValue.data : [];
+
+  useEffect(() => {
+    if (sessionsValue.state === "hasData") {
+      setLoadedSessions(sessionsValue.data);
+    }
+  }, [sessionsValue]);
+
+  const session = sessionValue.state === "hasData" ? sessionValue.data : null;
 
   const mapRef = useRef<L.Map | null>(null);
   const rdLayerRef = useRef<L.LayerGroup | null>(null);
@@ -78,100 +97,67 @@ function MapPage() {
   const [selectedDefectId, setSelectedDefectId] = useState<string | null>(null);
   const defectRefs = useRef<Map<string, HTMLLIElement>>(new Map());
 
+  // ── Lightbox state ──
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
   const PMTILES_URL = "pmtiles://philippines.pmtiles";
 
-/* Inside MapPage component */
-
-type RoadDefect = {
-  id: string | number;
-  classification?: string;
-  location: [number, number];
-  fixed: boolean;
-  archived?: boolean;
-  mainImageUrl?: string;
-};
-
-const markRoadDefectFixed = async (rdId: string | number) => {
-  try {
-    const marker = rdMarkersRef.current.get(rdId.toString());
-    if (marker) {
-      marker.setIcon(
-        L.icon({
-          iconUrl:
-            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-          shadowUrl:
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41],
-        })
-      );
+  const markRoadDefectFixed = async (rdId: string | number) => {
+    try {
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(L.icon({
+        iconUrl: "/marker-icon-green.png", shadowUrl: "/marker-shadow.png",
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+      }));
+      const result = await window.database.markFixed(Number(rdId));
+      console.log("markFixed result:", result);
+      triggerRefresh((prev) => prev + 1);
+    } catch (e) {
+      console.error("markFixed error:", e);
     }
+  };
 
-    await window.database.markFixed(Number(rdId));
-    triggerRefresh((prev) => prev + 1);
-
-  } catch (e) {
-    console.error(e);
-  }
-};
-
-
-const archiveRoadDefect = async (rdId: string | number) => {
-  try {
-    const marker = rdMarkersRef.current.get(rdId.toString());
-    if (marker) {
-      marker.setIcon(
-        L.icon({
-          iconUrl:
-            "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-grey.png",
-          shadowUrl:
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41],
-        })
-      );
+  const archiveRoadDefect = async (rdId: string | number) => {
+    try {
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(L.icon({
+        iconUrl: "/marker-icon-grey.png", shadowUrl: "/marker-shadow.png",
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+      }));
+      await window.database.archive(Number(rdId));
+      triggerRefresh((prev) => prev + 1);
+    } catch (e) {
+      console.error(e);
     }
+  };
 
-    await window.database.archive(Number(rdId));
-    triggerRefresh((prev) => prev + 1);
-  } catch (e) {
-    console.error(e);
-  }
-};
-
-
+  /* Initialize map once on mount */
   useEffect(() => {
-    if (mapRef.current) return;
+    const container = document.getElementById("map");
+    if (!container || mapRef.current) return;
 
-    mapRef.current = L.map("map").setView([12.8797, 121.7740], 6);
+    (container as any)._leaflet_id = undefined;
+    mapRef.current = L.map(container).setView([12.8797, 121.774], 6);
 
     if (!pmtilesRef.current) {
       pmtilesRef.current = new PMTiles(PMTILES_URL, undefined, decompressPMTiles);
     }
 
     protomapsL
-      .leafletLayer({
-        url: pmtilesRef.current,
-        flavor: "light",
-        lang: "en",
-      })
+      .leafletLayer({ url: pmtilesRef.current, flavor: "light", lang: "en" })
       .addTo(mapRef.current);
 
     rdLayerRef.current = L.layerGroup().addTo(mapRef.current);
 
     return () => {
-      mapRef.current?.remove();
-      mapRef.current = null;
-      rdLayerRef.current = null;
-      rdMarkersRef.current.clear();
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        rdLayerRef.current = null;
+        rdMarkersRef.current.clear();
+      }
     };
   }, []);
 
-  /* markers */
+  /* Update markers when session/data changes */
   useEffect(() => {
     if (!mapRef.current || !rdLayerRef.current) return;
 
@@ -179,16 +165,11 @@ const archiveRoadDefect = async (rdId: string | number) => {
     rdMarkersRef.current.clear();
 
     let rdList: any[] = [];
-
-    if (rdLoadable.state === "hasData") {
-      rdList = rdLoadable.data;
-    }
+    if (rdLoadable.state === "hasData") rdList = rdLoadable.data;
 
     if (!session) {
       sessions.forEach((s: any) => {
-        if (s.road_defects) {
-          rdList.push(...s.road_defects);
-        }
+        if (s.road_defects) rdList.push(...s.road_defects);
       });
     }
 
@@ -197,24 +178,15 @@ const archiveRoadDefect = async (rdId: string | number) => {
     const bounds = L.latLngBounds([]);
 
     rdList.forEach((rd) => {
+      if (!rd?.location) return;
       const [lat, lng] = rd.location;
-
-      if (lat === 0 || lng === 0 || Number.isNaN(lat) || Number.isNaN(lng)) return;
+      if (!isValidCoord(lat, lng)) return;
 
       const marker = L.marker([lat, lng], {
         icon: L.icon({
-          iconUrl:
-            rd.archived
-              ? "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-grey.png"
-              : rd.fixed
-              ? "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png"
-              : "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-          shadowUrl:
-            "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41],
+          iconUrl: rd.archived ? "/marker-icon-grey.png" : rd.fixed ? "/marker-icon-green.png" : "/marker-icon-red.png",
+          shadowUrl: "/marker-shadow.png",
+          iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
         }),
       }).bindPopup(`
         <b>Classification:</b> ${rd.classification || "Unknown"}<br/>
@@ -227,174 +199,273 @@ const archiveRoadDefect = async (rdId: string | number) => {
       marker.on("click", () => {
         const id = rd.id.toString();
         setSelectedDefectId(id);
-
-        const element = defectRefs.current.get(id);
-        if (element) {
-          element.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-        }
+        defectRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
-
 
       bounds.extend([lat, lng]);
     });
 
-    if (bounds.isValid()) {
-      mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+    if (!bounds.isValid() || !mapRef.current) return;
+
+    const map = mapRef.current;
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+
+    if (ne.lat === sw.lat && ne.lng === sw.lng) {
+      map.flyTo([ne.lat, ne.lng], 15, { animate: true, duration: 1 });
+    } else {
+      map.flyToBounds(bounds, { padding: [50, 50], animate: true, duration: 1 });
     }
-  }, [rdLoadable]);
+  }, [rdLoadable, session]);
+
+  const displayedDefects =
+    rdLoadable.state === "hasData"
+      ? rdLoadable.data.filter((rd: RoadDefect) =>
+          activeTab === "active" ? !rd.archived : rd.archived
+        )
+      : [];
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex flex-row h-full w-full bg-slate-50 dark:bg-slate-900 p-4 gap-4 overflow-hidden">
 
-      {/* Select Session */}
-      <div className="hidden md:flex md:w-1/4 lg:w-80 flex-col bg-slate-800 p-4 text-white">
-        <h2 className="font-semibold mb-4">Sessions</h2>
-
-        <div className="flex flex-col gap-2 overflow-y-auto">
-          {sessions.length === 0 && (
-            <p className="text-slate-400">No sessions available</p>
-          )}
-
-          {sessions.map((s: Session) => (
+      {/* ── Lightbox Modal ── */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <div
+            className="relative"
+            style={{ maxWidth: '90vw', maxHeight: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
             <button
-              key={s.id}
-              onClick={() => setSelectedSessionID(s.id)}
-              className="w-full text-left p-2 rounded bg-slate-700 hover:bg-slate-600 transition"
+              className="absolute -top-3 -right-3 z-10 bg-white dark:bg-slate-700 rounded-full p-1.5 shadow-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+              onClick={() => setLightboxUrl(null)}
             >
-              <div className="text-sm font-medium">{s.id}</div>
-              <div className="text-xs text-slate-300">{s.timestamp}</div>
+              <X className="w-4 h-4 text-slate-700 dark:text-slate-200" />
             </button>
-          ))}
+
+            {/* Image */}
+            <img
+              src={lightboxUrl}
+              alt="Defect Image"
+              style={{ maxWidth: '90vw', maxHeight: '90vh', width: 'auto', height: 'auto', minWidth: '400px', minHeight: '300px' }}
+              className="rounded-xl shadow-2xl border border-white/10 block"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Left Panel: Sessions ── */}
+      <div className="flex flex-col w-full md:w-1/3 lg:w-1/4 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+
+        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-200">
+            <MapIcon className="w-5 h-5 text-blue-500" />
+            Sessions
+          </h2>
+        </div>
+
+        <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+          <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Session Log</span>
+          <span className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-full text-xs">
+            {sessions.length} Total
+          </span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          {sessions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
+              <MapIcon className="w-12 h-12 mb-2 opacity-20" />
+              <p className="text-sm">No sessions available.</p>
+              <p className="text-xs">Start a detection session to see data.</p>
+            </div>
+          ) : (
+            sessions.map((s: Session) => (
+              <button
+                key={s.id}
+                onClick={() => setSelectedSessionID(s.id)}
+                className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                  currentSessionID === s.id
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700"
+                }`}
+              >
+                <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">{s.id}</div>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  <Clock className="w-3 h-3" />
+                  <span>{s.timestamp}</span>
+                </div>
+              </button>
+            ))
+          )}
         </div>
       </div>
 
-      {/* Interactive Map */}
-      <div className="flex-1 bg-slate-900">
-        <div id="map" className="h-full w-full" />
+      {/* ── Center Panel: Map ── */}
+      <div className="flex-1 rounded-xl shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+        <div id="map" className="h-full w-full z-0" />
       </div>
 
-      {/* Session Details */}
-      <div className="hidden md:flex md:w-1/4 lg:w-80 flex-col bg-slate-800 p-4 text-white">
-        <h2 className="font-semibold mb-4">Session Details</h2>
+      {/* ── Right Panel: Session Details ── */}
+      <div className="flex flex-col w-full md:w-1/3 lg:w-1/4 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+
+        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-200">
+            <Activity className="w-5 h-5 text-blue-500" />
+            Session Details
+          </h2>
+        </div>
 
         {session ? (
-          <div className="space-y-4 text-sm">
-            <div><b>ID:</b> {session.id}</div>
-            <div><b>Started:</b> {session.timestamp}</div>
-            <div>
-              <b>Start:</b> {session.start_location[0]}, {session.start_location[1]}
+          <>
+            {/* Meta */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500 dark:text-slate-400">ID</span>
+                <span className="font-medium text-slate-700 dark:text-slate-200">{session.id}</span>
+              </div>
+              <div className="flex justify-between items-start">
+                <span className="text-slate-500 dark:text-slate-400">Started</span>
+                <span className="font-medium text-slate-700 dark:text-slate-200 text-xs text-right">{session.timestamp}</span>
+              </div>
+              <div className="flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400 pt-1">
+                <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
+                <span>Start: {session.start_location[0]}, {session.start_location[1]}</span>
+              </div>
+              <div className="flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
+                <span>End: {session.end_location[0]}, {session.end_location[1]}</span>
+              </div>
             </div>
-            <div>
-              <b>End:</b> {session.end_location[0]}, {session.end_location[1]}
+
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 dark:border-slate-700">
+              {(["active", "archive"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={`flex-1 px-3 py-2 text-xs font-medium capitalize transition-colors ${
+                    activeTab === tab
+                      ? "border-b-2 border-blue-500 text-blue-500"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
 
-            <hr className="border-slate-600" />
+            {/* Defect count badge */}
+            <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Defects</span>
+              <span className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-full text-xs">
+                {rdLoadable.state === "hasData" ? displayedDefects.length : "—"} Total
+              </span>
+            </div>
 
-            <div>
-      <b>Detected Road Defects:</b>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex mt-2 border-b border-slate-600">
-          <button
-            className={`px-3 py-1 text-xs ${
-              activeTab === "active"
-                ? "border-b-2 border-blue-400 text-blue-400"
-                : "text-slate-400"
-            }`}
-            onClick={() => setActiveTab("active")}
-          >
-            Active
-          </button>
-
-          <button
-            className={`px-3 py-1 text-xs ${
-              activeTab === "archive"
-                ? "border-b-2 border-blue-400 text-blue-400"
-                : "text-slate-400"
-            }`}
-            onClick={() => setActiveTab("archive")}
-          >
-            Archive
-          </button>
-        </div>
-
-            {rdLoadable.state === "loading" && (
-              <p className="text-slate-400">Loading defects…</p>
-            )}
-
-            {rdLoadable.state === "hasData" &&
-              rdLoadable.data.length === 0 && (
-                <p className="text-slate-400">No defects detected</p>
+            {/* Defects list */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+              {rdLoadable.state === "loading" && (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
+                  <Activity className="w-12 h-12 mb-2 opacity-20 animate-pulse" />
+                  <p className="text-sm">Loading defects…</p>
+                </div>
               )}
 
-            {rdLoadable.state === "hasData" && (
-              <ul className="space-y-1 max-h-120 overflow-y-auto">
-                {rdLoadable.data
-                  .filter((rd: RoadDefect) =>
-                    activeTab === "active"
-                      ? !rd.archived
-                      : rd.archived
-                  )
-                  .map((rd: RoadDefect, idx: number) => {
-                    return (
-                      <li
-                        key={idx}
-                        ref={(el) => {
-                          if (el) defectRefs.current.set(rd.id.toString(), el);
-                        }}
-                        className={`p-2 rounded text-xs cursor-pointer transition ${
-                          selectedDefectId === rd.id.toString()
-                            ? "bg-blue-600"
-                            : "bg-slate-700 hover:bg-slate-600"
-                        }`}
-                        onClick={() => {
-                          const marker = rdMarkersRef.current.get(rd.id.toString());
-                          if (marker) {
-                            marker.openPopup();
-                            mapRef.current?.panTo(marker.getLatLng());
-                          }
+              {rdLoadable.state === "hasData" && displayedDefects.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
+                  <Activity className="w-12 h-12 mb-2 opacity-20" />
+                  <p className="text-sm">No defects here.</p>
+                  <p className="text-xs">
+                    {activeTab === "active" ? "All clear or check Archive." : "No archived defects yet."}
+                  </p>
+                </div>
+              )}
+
+              {rdLoadable.state === "hasData" &&
+                displayedDefects.map((rd: RoadDefect, idx: number) => (
+                  <li
+                    key={idx}
+                    ref={(el) => { if (el) defectRefs.current.set(rd.id.toString(), el as HTMLLIElement); }}
+                    style={{ listStyleType: "none" }}
+                    className={`p-3 rounded-lg border text-xs cursor-pointer transition-colors ${
+                      selectedDefectId === rd.id.toString()
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                        : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                    onClick={() => {
+                      const id = rd.id.toString();
+                      setSelectedDefectId(id);
+                      const marker = rdMarkersRef.current.get(id);
+                      if (marker) {
+                        marker.openPopup();
+                        mapRef.current?.panTo(marker.getLatLng());
+                      }
+                    }}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">ID: {rd.id}</span>
+                      <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-xs">
+                        Class {rd.classification || "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-1 text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span>{Number(rd.location[0]).toFixed(5)}, {Number(rd.location[1]).toFixed(5)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Activity className="w-3 h-3 shrink-0" />
+                        <span>{rd.fixed ? "Fixed" : "Unfixed"}</span>
+                      </div>
+                    </div>
+
+                    {/* ── Image preview button ── */}
+                    {rd.mainImageUrl && (
+                      <button
+                        className="mt-2 w-full flex items-center gap-1.5 text-blue-500 hover:text-blue-400 transition-colors text-xs group"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLightboxUrl(rd.mainImageUrl!);
                         }}
                       >
-                        <div><b>Type:</b> {rd.classification || "Unknown"}</div>
-                        <div><b>Location:</b> {rd.location[0]}, {rd.location[1]}</div>
-                        <div><b>Status:</b> {rd.fixed ? "Fixed" : "Unfixed"}</div>
-                        <div><b>Image:</b> {rd.mainImageUrl}</div>
+                        <ZoomIn className="w-3 h-3 shrink-0 group-hover:scale-110 transition-transform" />
+                        <span className="underline underline-offset-2">View Photo</span>
+                      </button>
+                    )}
 
-                      {/* Archive & Fixed buttons */}
-
-                      <div className="flex gap-2 mt-1">
-
-                        {!rd.fixed && (
-                          <button
-                            className="px-2 py-1 text-xs bg-green-600 rounded hover:bg-green-500"
-                            onClick={() => markRoadDefectFixed(rd.id)}
-                          >
-                            Mark Fixed
-                          </button>
-                        )}
-                        {!rd.archived && (
-                          <button
-                            className="px-2 py-1 text-xs bg-red-600 rounded hover:bg-red-500"
-                            onClick={() => archiveRoadDefect(rd.id)}
-                          >
-                            Archive
-                          </button>
-                        )}
-
-                      </div>
-
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+                    <div className="flex gap-2 mt-2">
+                      {!rd.fixed && (
+                        <button
+                          className="px-2 py-1 text-xs font-medium rounded bg-green-600 hover:bg-green-500 text-white transition-colors"
+                          onClick={(e) => { e.stopPropagation(); markRoadDefectFixed(rd.id); }}
+                        >
+                          Mark Fixed
+                        </button>
+                      )}
+                      {!rd.archived && (
+                        <button
+                          className="px-2 py-1 text-xs font-medium rounded bg-red-500 hover:bg-red-400 text-white transition-colors"
+                          onClick={(e) => { e.stopPropagation(); archiveRoadDefect(rd.id); }}
+                        >
+                          Archive
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+            </div>
+          </>
         ) : (
-          <p className="text-slate-400">Select a session from the left</p>
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
+            <MapIcon className="w-12 h-12 mb-2 opacity-20" />
+            <p className="text-sm">No session selected.</p>
+            <p className="text-xs">Pick a session from the left panel.</p>
+          </div>
         )}
       </div>
 

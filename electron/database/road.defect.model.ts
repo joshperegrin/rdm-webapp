@@ -47,9 +47,27 @@ export interface SessionSavePayload {
   }>;
 }
 
+/**
+ * Converts an absolute file system path to a localfile:// URL
+ * that the Electron custom protocol handler can serve to the renderer.
+ * e.g. "C:\Users\...\4.jpg" → "localfile://C:/Users/.../4.jpg"
+ */
+function toLocalFileUrl(filePath: string | null | undefined): string | null {
+  if (!filePath) return null;
+  const normalized = filePath
+    .replace(/^file:\/\/\//, '') // strip existing file:/// if any
+    .replace(/\\/g, '/');        // normalize Windows backslashes
+  return `localfile://file?path=${encodeURIComponent(normalized)}`;
+}
+
 export async function getRoadDefectsBySession(sessionId: number): Promise<RoadDefect[]> {
   const stmt = db.prepare(`SELECT * FROM road_defects WHERE session = ?`);
-  return stmt.all(sessionId) as RoadDefect[];
+  const rows = stmt.all(sessionId) as RoadDefect[];
+
+  return rows.map((row) => ({
+    ...row,
+    thumbnail_path: toLocalFileUrl(row.thumbnail_path) ?? row.thumbnail_path,
+  }));
 }
 
 export async function createRoadDefect(data: Omit<RoadDefect, 'road_defects_id'>) {

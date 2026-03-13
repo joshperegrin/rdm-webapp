@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, net } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
-import { Readable } from 'node:stream'
+import { pathToFileURL } from 'node:url'
 import ReceiverClient from './lib/receiver'
 import { 
   getRoadDefectsBySession, 
@@ -11,7 +11,6 @@ import {
   archiveRoadDefect, 
   getAllSessions,
 } from './database/road.defect.model'
-// import db from './database/db'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -19,6 +18,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'pmtiles',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+  {
+    scheme: 'localfile',
     privileges: {
       standard: true,
       secure: true,
@@ -89,23 +98,58 @@ function registerPmtilesProtocol() {
 
       if (range) {
         const { start, end } = range
-        const stream = fs.createReadStream(filePath, { start, end })
-        headers.set('Content-Range', `bytes ${start}-${end}/${stat.size}`)
-        headers.set('Content-Length', String(end - start + 1))
-        return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
-          status: 206,
-          headers,
+        const buffer = await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = []
+          const stream = fs.createReadStream(filePath, { start, end })
+          stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+          stream.on('end', () => resolve(Buffer.concat(chunks)))
+          stream.on('error', reject)
         })
+        headers.set('Content-Range', `bytes ${start}-${end}/${stat.size}`)
+        headers.set('Content-Length', String(buffer.byteLength))
+        return new Response(buffer, { status: 206, headers })
       }
 
-      const stream = fs.createReadStream(filePath)
-      headers.set('Content-Length', String(stat.size))
-      return new Response(Readable.toWeb(stream) as unknown as BodyInit, {
-        status: 200,
-        headers,
-      })
+      const buffer = await fs.promises.readFile(filePath)
+      headers.set('Content-Length', String(buffer.byteLength))
+      return new Response(buffer, { status: 200, headers })
+
     } catch (error) {
       console.error('[pmtiles] Failed to load', filePath, error)
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+function registerLocalFileProtocol() {
+  const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+
+  protocol.handle('localfile', async (request) => {
+    try {
+      // Path is stored as a query param to avoid drive letter being parsed as hostname
+      // e.g. localfile://file?path=C%3A%2FUsers%2F...%2F4.jpg
+      const url = new URL(request.url)
+      const rawPath = url.searchParams.get('path')
+
+      if (!rawPath) {
+        console.warn('[localfile] Missing path query param:', request.url)
+        return new Response('Bad Request', { status: 400 })
+      }
+
+      // Normalize to OS-native path
+      const absolutePath = path.normalize(rawPath)
+
+      // Security: only allow image file extensions
+      const ext = path.extname(absolutePath).toLowerCase()
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        console.warn('[localfile] Blocked non-image file:', absolutePath)
+        return new Response('Forbidden', { status: 403 })
+      }
+
+      console.log('[localfile] Serving:', absolutePath)
+      return net.fetch(pathToFileURL(absolutePath).toString())
+    } catch (error) {
+      console.error('[localfile] Failed to serve file:', error)
       return new Response('Not found', { status: 404 })
     }
   })
@@ -140,9 +184,6 @@ function createWindow() {
   })
   
   // 2. Start Capture
-  // The callback passed here handles the image frame.
-  // ReceiverClient decides whether to pass the Raw Frame (from Pi) or Annotated Frame (from Python)
-  // based on the 'liveInferencePreview' toggle.
   ipcMain.handle('rasp_connection:send_startreq', () => {
     sentInferenceIds.clear();
     return receiver.sendStartRequest((buffer)=> {
@@ -152,6 +193,7 @@ function createWindow() {
       }
     })
   })
+
   // 3. Stop Capture
   ipcMain.handle('rasp_connection:send_stopreq', async () => {
     const res = await receiver.sendStopRequest();
@@ -160,7 +202,6 @@ function createWindow() {
   })
 
   // 4. Toggle Preview Mode
-  // Renderer calls this with true/false.
   ipcMain.handle('rasp_connection:toggle_preview', (_, showAnnotated: boolean) => {
     receiver.liveInferencePreview = showAnnotated;
     console.log(`[MAIN] Preview Mode Switched. Annotated: ${showAnnotated}`);
@@ -168,8 +209,6 @@ function createWindow() {
   })
 
   // 5. Inference Data Listener
-  // This listener is ALWAYS active once set. It sends JSON tracking data to the frontend
-  // regardless of which video stream is being viewed.
   const sentInferenceIds = new Set<number>();
   const sentInferenceWithoutLocation = new Set<number>();
   receiver.setInferenceCallback((data) => {
@@ -203,7 +242,7 @@ function createWindow() {
   })
   
   ipcMain.handle('db:get-sessions', async () => {
-     return await getAllSessions();
+    return await getAllSessions();
   });
 
   ipcMain.handle('db:get-road-defects', async (_, sessionId: number) => {
@@ -234,5 +273,6 @@ app.on('activate', () => {
 
 app.whenReady().then(() => {
   registerPmtilesProtocol()
+  registerLocalFileProtocol()
   createWindow()
 })
