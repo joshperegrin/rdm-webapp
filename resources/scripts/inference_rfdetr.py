@@ -10,6 +10,14 @@ import onnxruntime as ort
 from tracker.byte_tracker import BYTETracker
 from tracker.basetrack import BaseTrack
 
+CLASS_NAMES = {
+    1: "Longitudinal Crack",
+    2: "Transverse Crack",
+    3: "Alligator Crack",
+    4: "Pothole",
+    5: "Patchy Road",
+}
+
 # --- CONFIGURATION ---
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9123
@@ -304,7 +312,7 @@ try:
             # Add to list for Electron
             tracked_objects.append({
                 "id": int(t.track_id),
-                "class": int(current_class),
+                "class": CLASS_NAMES.get(current_class, f"Class {current_class}"),
                 "box": [float(x) for x in track_box] # [x1, y1, x2, y2]
             })
             print(f"ID: {t.track_id} | Class: {current_class} | Box: {track_box}") 
