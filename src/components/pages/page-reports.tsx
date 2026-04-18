@@ -1,6 +1,7 @@
 import { useAtom } from "jotai";
 import { reportsLoadable, recentSessionsLoadable, selectedSessionID } from "@/state";
 import { BarChart2, Download, FileText, FileJson } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   BarChart,
   Bar,
@@ -17,7 +18,28 @@ import {
 
 // ── Download Helpers ────────────────────────────────────────────────
 
-function defectsToCSV(defects: any[], sessionLabel: string): string {
+type ReportDefect = {
+  id?: string | number;
+  road_defects_id?: string | number;
+  session?: string | number;
+  ave_lat?: number | string | null;
+  ave_lng?: number | string | null;
+  ave_classification?: string | null;
+  is_fixed?: number | boolean | null;
+  is_archived?: number | boolean | null;
+};
+
+type ReportSession = {
+  id: string;
+  timestamp: string;
+};
+
+type DefectTypeSummary = {
+  type: string;
+  count: number;
+};
+
+function defectsToCSV(defects: ReportDefect[]): string {
   const headers = [
     "ID",
     "Session ID",
@@ -28,7 +50,7 @@ function defectsToCSV(defects: any[], sessionLabel: string): string {
     "Archived",
   ];
 
-  const rows = defects.map((d: any) => [
+  const rows = defects.map((d) => [
     d.road_defects_id ?? d.id ?? "",
     d.session ?? "",
     d.ave_lat ?? "",
@@ -40,11 +62,51 @@ function defectsToCSV(defects: any[], sessionLabel: string): string {
 
   const csvContent = [headers, ...rows]
     .map((row) =>
-      row.map((cell: any) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
     )
     .join("\n");
 
   return csvContent;
+}
+
+function buildSummaryReport(params: {
+  sessionLabel: string;
+  totalSessions: number;
+  totalDefects: number;
+  activeDefects: number;
+  fixedDefects: number;
+  fixRate: number;
+  defectsByType: DefectTypeSummary[];
+}): string {
+  const {
+    sessionLabel,
+    totalSessions,
+    totalDefects,
+    activeDefects,
+    fixedDefects,
+    fixRate,
+    defectsByType,
+  } = params;
+
+  const lines = [
+    "Road Defects Report",
+    `Generated: ${new Date().toLocaleString()}`,
+    `Scope: ${sessionLabel}`,
+    "",
+    "Overview",
+    `Total Sessions: ${totalSessions}`,
+    `Total Defects: ${totalDefects}`,
+    `Active Defects: ${activeDefects}`,
+    `Fixed Defects: ${fixedDefects}`,
+    `Fix Rate: ${fixRate}%`,
+    "",
+    "Defects by Classification",
+    ...(defectsByType.length === 0
+      ? ["No defect records found."]
+      : defectsByType.map((item) => `${item.type}: ${item.count}`)),
+  ];
+
+  return lines.join("\n");
 }
 
 function downloadFile(content: string, filename: string, mimeType: string) {
@@ -58,7 +120,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 }
 
 function sanitizeFilename(label: string): string {
-  return label.replace(/[^a-z0-9_\-]/gi, "_").toLowerCase();
+  return label.replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
 }
 
 // ── Component ───────────────────────────────────────────────────────
@@ -68,7 +130,8 @@ function ReportsPage() {
   const [sessionsValue] = useAtom(recentSessionsLoadable);
   const [selectedSession, setSelectedSession] = useAtom(selectedSessionID);
 
-  const sessions = sessionsValue.state === "hasData" ? sessionsValue.data : [];
+  const sessions: ReportSession[] =
+    sessionsValue.state === "hasData" ? (sessionsValue.data as ReportSession[]) : [];
 
   if (reportsValue.state === "loading") {
     return (
@@ -85,27 +148,30 @@ function ReportsPage() {
     );
   }
 
-  const { sessions: reportSessions, allDefects: allRoadDefects } = reportsValue.data;
+  const { sessions: reportSessions, allDefects: allRoadDefects } = reportsValue.data as {
+    sessions: ReportSession[];
+    allDefects: ReportDefect[];
+  };
 
   // Filter defects by selected session if one is chosen
   const isAllSessions = !selectedSession || selectedSession === "";
   const roadDefects = isAllSessions
     ? allRoadDefects
     : allRoadDefects.filter(
-        (d: any) =>
+        (d) =>
           d.session === Number(String(selectedSession).replace("session-", ""))
       );
 
   // KPI
   const totalSessions = reportSessions.length;
   const totalDefects = roadDefects.length;
-  const activeDefects = roadDefects.filter((d: any) => d.is_fixed === 0).length;
-  const fixedDefects = roadDefects.filter((d: any) => d.is_fixed === 1).length;
+  const activeDefects = roadDefects.filter((d) => d.is_fixed === 0).length;
+  const fixedDefects = roadDefects.filter((d) => d.is_fixed === 1).length;
   const fixRate =
     totalDefects === 0 ? 0 : Math.round((fixedDefects / totalDefects) * 100);
 
   const defectsByType = roadDefects.reduce(
-    (acc: any[], item: any) => {
+    (acc: DefectTypeSummary[], item) => {
       const cls = item.ave_classification || "Unknown";
       const index = acc.findIndex((x) => x.type === cls);
       if (index >= 0) acc[index].count += 1;
@@ -121,21 +187,31 @@ function ReportsPage() {
   ];
 
   // ── Download handlers ──
-  const sessionLabel = isAllSessions
+  const selectedSessionLabel = isAllSessions
+    ? "All Sessions"
+    : `Session ${String(selectedSession).replace("session-", "")}`;
+  const sessionFilename = isAllSessions
     ? "all_sessions"
     : sanitizeFilename(String(selectedSession));
+  const hasReportData = roadDefects.length > 0;
 
   const handleDownloadCSV = () => {
-    const csv = defectsToCSV(roadDefects, sessionLabel);
-    downloadFile(csv, `road_defects_${sessionLabel}.csv`, "text/csv;charset=utf-8;");
+    const csv = defectsToCSV(roadDefects);
+    downloadFile(
+      csv,
+      `road_defects_${sessionFilename}.csv`,
+      "text/csv;charset=utf-8;"
+    );
   };
 
   const handleDownloadJSON = () => {
     const payload = {
       exportedAt: new Date().toISOString(),
+      scope: selectedSessionLabel,
       session: isAllSessions ? "all" : selectedSession,
+      totalSessions,
       totalDefects: roadDefects.length,
-      defects: roadDefects.map((d: any) => ({
+      defects: roadDefects.map((d) => ({
         id: d.road_defects_id ?? d.id,
         session: d.session,
         latitude: d.ave_lat,
@@ -147,8 +223,26 @@ function ReportsPage() {
     };
     downloadFile(
       JSON.stringify(payload, null, 2),
-      `road_defects_${sessionLabel}.json`,
+      `road_defects_${sessionFilename}.json`,
       "application/json"
+    );
+  };
+
+  const handleDownloadSummary = () => {
+    const summary = buildSummaryReport({
+      sessionLabel: selectedSessionLabel,
+      totalSessions,
+      totalDefects,
+      activeDefects,
+      fixedDefects,
+      fixRate,
+      defectsByType,
+    });
+
+    downloadFile(
+      summary,
+      `road_defects_report_${sessionFilename}.txt`,
+      "text/plain;charset=utf-8;"
     );
   };
 
@@ -199,7 +293,7 @@ function ReportsPage() {
               <p className="text-sm">No sessions available.</p>
             </div>
           ) : (
-            sessions.map((s: any) => (
+            sessions.map((s) => (
               <button
                 key={s.id}
                 onClick={() => setSelectedSession(s.id)}
@@ -241,6 +335,36 @@ function ReportsPage() {
             <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs px-2 py-1 rounded-full font-medium">
               {totalDefects} Defects
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadSummary}
+              disabled={!hasReportData}
+              className="border-slate-200 dark:border-slate-700"
+            >
+              <Download className="w-4 h-4" />
+              Report
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadCSV}
+              disabled={!hasReportData}
+              className="border-slate-200 dark:border-slate-700"
+            >
+              <FileText className="w-4 h-4" />
+              CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadJSON}
+              disabled={!hasReportData}
+              className="border-slate-200 dark:border-slate-700"
+            >
+              <FileJson className="w-4 h-4" />
+              JSON
+            </Button>
           </div>
         </div>
 
@@ -350,7 +474,7 @@ function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {roadDefects.map((d: any, idx: number) => (
+                  {roadDefects.map((d, idx: number) => (
                     <tr
                       key={idx}
                       className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
