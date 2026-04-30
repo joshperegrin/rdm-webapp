@@ -65,6 +65,37 @@ type RoadDefect = {
   mainImageUrl?: string;
 };
 
+const CLASS_COLORS: { label: string; color: string }[] = [
+  { label: "Longitudinal Crack", color: "#dc2626" },
+  { label: "Transverse Crack", color: "#ea580c" },
+  { label: "Alligator Crack", color: "#7c3aed" },
+  { label: "Pothole", color: "#2563eb" },
+  { label: "Patchy Road", color: "#d97706" },
+];
+
+const NEUTRAL_COLOR = "#6b7280";
+
+const colorForDefect = (rd: { classification?: string; fixed?: boolean; archived?: boolean }) => {
+  if (rd.archived || rd.fixed) return NEUTRAL_COLOR;
+  const match = CLASS_COLORS.find((c) => c.label === rd.classification);
+  return match ? match.color : NEUTRAL_COLOR;
+};
+
+const buildIcon = (color: string) =>
+  L.divIcon({
+    className: "rdm-defect-pin",
+    html: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+        <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 9.4 12.5 28.5 12.5 28.5S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"
+              fill="${color}" stroke="#1f2937" stroke-width="1"/>
+        <circle cx="12.5" cy="12.5" r="5" fill="#ffffff"/>
+      </svg>
+    `,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+  });
+
 const isValidCoord = (lat: any, lng: any): boolean =>
   lat != null && lng != null &&
   !Number.isNaN(lat) && !Number.isNaN(lng) &&
@@ -104,10 +135,7 @@ function MapPage() {
 
   const markRoadDefectFixed = async (rdId: string | number) => {
     try {
-      rdMarkersRef.current.get(rdId.toString())?.setIcon(L.icon({
-        iconUrl: "/marker-icon-green.png", shadowUrl: "/marker-shadow.png",
-        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-      }));
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR));
       const result = await window.database.markFixed(Number(rdId));
       console.log("markFixed result:", result);
       triggerRefresh((prev) => prev + 1);
@@ -118,10 +146,7 @@ function MapPage() {
 
   const archiveRoadDefect = async (rdId: string | number) => {
     try {
-      rdMarkersRef.current.get(rdId.toString())?.setIcon(L.icon({
-        iconUrl: "/marker-icon-grey.png", shadowUrl: "/marker-shadow.png",
-        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-      }));
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR));
       await window.database.archive(Number(rdId));
       triggerRefresh((prev) => prev + 1);
     } catch (e) {
@@ -183,11 +208,7 @@ function MapPage() {
       if (!isValidCoord(lat, lng)) return;
 
       const marker = L.marker([lat, lng], {
-        icon: L.icon({
-          iconUrl: rd.archived ? "/marker-icon-grey.png" : rd.fixed ? "/marker-icon-green.png" : "/marker-icon-red.png",
-          shadowUrl: "/marker-shadow.png",
-          iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-        }),
+        icon: buildIcon(colorForDefect(rd)),
       }).bindPopup(`
         <b>Classification:</b> ${rd.classification || "Unknown"}<br/>
         <b>Timestamp:</b> ${rd.timestamp || "N/A"}<br/>
@@ -305,8 +326,31 @@ function MapPage() {
       </div>
 
       {/* ── Center Panel: Map ── */}
-      <div className="flex-1 rounded-xl shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700">
+      <div className="flex-1 rounded-xl shadow-sm overflow-hidden border border-slate-200 dark:border-slate-700 relative">
         <div id="map" className="h-full w-full z-0" />
+
+        {/* Legend */}
+        <div className="absolute bottom-4 right-4 z-[1000] bg-white/95 dark:bg-slate-800/95 text-slate-700 dark:text-slate-200 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-3 text-xs">
+          <div className="font-semibold mb-2 text-slate-800 dark:text-slate-100">Legend</div>
+          <ul className="space-y-1.5">
+            {CLASS_COLORS.map(({ label, color }) => (
+              <li key={label} className="flex items-center gap-2">
+                <span
+                  className="inline-block w-3 h-3 rounded-full border border-slate-700"
+                  style={{ backgroundColor: color }}
+                />
+                <span>{label}</span>
+              </li>
+            ))}
+            <li className="flex items-center gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-700">
+              <span
+                className="inline-block w-3 h-3 rounded-full border border-slate-700"
+                style={{ backgroundColor: NEUTRAL_COLOR }}
+              />
+              <span>Fixed / Archived / Unknown</span>
+            </li>
+          </ul>
+        </div>
       </div>
 
       {/* ── Right Panel: Session Details ── */}
