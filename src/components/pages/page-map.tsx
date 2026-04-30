@@ -65,6 +65,27 @@ type RoadDefect = {
   mainImageUrl?: string;
 };
 
+const CLASS_SYMBOLS: Record<string, string> = {
+  // Longitudinal crack: vertical zigzag along the road direction
+  "Longitudinal Crack":
+    '<polyline points="12,3 9,8 15,12 9,16 12,21" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  // Transverse crack: horizontal zigzag across the road
+  "Transverse Crack":
+    '<polyline points="3,12 8,9 12,15 16,9 21,12" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  // Alligator crack: interconnected hatch pattern
+  "Alligator Crack":
+    '<g fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"><path d="M5 9 L19 9"/><path d="M5 15 L19 15"/><path d="M9 4 L9 20"/><path d="M15 4 L15 20"/></g>',
+  // Pothole: dark hole with rim
+  Pothole:
+    '<circle cx="12" cy="12" r="6" fill="#ffffff" stroke="none"/><ellipse cx="12" cy="12" rx="3.2" ry="2.6" fill="#1f2937"/>',
+  // Patchy Road: rectangular patch
+  "Patchy Road":
+    '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="none" stroke="#ffffff" stroke-width="2"/><path d="M6 12 L18 12" stroke="#ffffff" stroke-width="1.4" stroke-dasharray="2 2"/>',
+};
+
+const NEUTRAL_SYMBOL =
+  '<polyline points="6,12 10,16 18,8" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>';
+
 const CLASS_COLORS: { label: string; color: string }[] = [
   { label: "Longitudinal Crack", color: "#dc2626" },
   { label: "Transverse Crack", color: "#ea580c" },
@@ -81,19 +102,24 @@ const colorForDefect = (rd: { classification?: string; fixed?: boolean; archived
   return match ? match.color : NEUTRAL_COLOR;
 };
 
-const buildIcon = (color: string) =>
+const symbolForDefect = (rd: { classification?: string; fixed?: boolean; archived?: boolean }) => {
+  if (rd.archived || rd.fixed) return NEUTRAL_SYMBOL;
+  if (rd.classification && CLASS_SYMBOLS[rd.classification]) return CLASS_SYMBOLS[rd.classification];
+  return NEUTRAL_SYMBOL;
+};
+
+const buildIcon = (color: string, symbol: string) =>
   L.divIcon({
     className: "rdm-defect-pin",
     html: `
-      <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
-        <path d="M12.5 0C5.6 0 0 5.6 0 12.5c0 9.4 12.5 28.5 12.5 28.5S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"
-              fill="${color}" stroke="#1f2937" stroke-width="1"/>
-        <circle cx="12.5" cy="12.5" r="5" fill="#ffffff"/>
+      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="11" fill="${color}" stroke="#1f2937" stroke-width="1.2"/>
+        ${symbol}
       </svg>
     `,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -14],
   });
 
 const isValidCoord = (lat: any, lng: any): boolean =>
@@ -135,7 +161,7 @@ function MapPage() {
 
   const markRoadDefectFixed = async (rdId: string | number) => {
     try {
-      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR));
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR, NEUTRAL_SYMBOL));
       const result = await window.database.markFixed(Number(rdId));
       console.log("markFixed result:", result);
       triggerRefresh((prev) => prev + 1);
@@ -146,7 +172,7 @@ function MapPage() {
 
   const archiveRoadDefect = async (rdId: string | number) => {
     try {
-      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR));
+      rdMarkersRef.current.get(rdId.toString())?.setIcon(buildIcon(NEUTRAL_COLOR, NEUTRAL_SYMBOL));
       await window.database.archive(Number(rdId));
       triggerRefresh((prev) => prev + 1);
     } catch (e) {
@@ -208,7 +234,7 @@ function MapPage() {
       if (!isValidCoord(lat, lng)) return;
 
       const marker = L.marker([lat, lng], {
-        icon: buildIcon(colorForDefect(rd)),
+        icon: buildIcon(colorForDefect(rd), symbolForDefect(rd)),
       }).bindPopup(`
         <b>Classification:</b> ${rd.classification || "Unknown"}<br/>
         <b>Timestamp:</b> ${rd.timestamp || "N/A"}<br/>
@@ -336,16 +362,30 @@ function MapPage() {
             {CLASS_COLORS.map(({ label, color }) => (
               <li key={label} className="flex items-center gap-2">
                 <span
-                  className="inline-block w-3 h-3 rounded-full border border-slate-700"
-                  style={{ backgroundColor: color }}
+                  className="inline-block w-5 h-5 shrink-0"
+                  dangerouslySetInnerHTML={{
+                    __html: `
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="11" fill="${color}" stroke="#1f2937" stroke-width="1.2"/>
+                        ${CLASS_SYMBOLS[label] ?? ""}
+                      </svg>
+                    `,
+                  }}
                 />
                 <span>{label}</span>
               </li>
             ))}
             <li className="flex items-center gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-700">
               <span
-                className="inline-block w-3 h-3 rounded-full border border-slate-700"
-                style={{ backgroundColor: NEUTRAL_COLOR }}
+                className="inline-block w-5 h-5 shrink-0"
+                dangerouslySetInnerHTML={{
+                  __html: `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="11" fill="${NEUTRAL_COLOR}" stroke="#1f2937" stroke-width="1.2"/>
+                      ${NEUTRAL_SYMBOL}
+                    </svg>
+                  `,
+                }}
               />
               <span>Fixed / Archived / Unknown</span>
             </li>
